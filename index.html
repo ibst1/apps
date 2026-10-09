@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Small Windows apps – Sebastian Ibstedt</title>
+<meta name="description" content="Free, small Windows tools by Sebastian Ibstedt. Download and run, no installation needed.">
+<style>
+  :root {
+    --bg: #faf9f6; --card: #ffffff; --text: #1d1d1f; --muted: #5f5f66;
+    --line: #e4e2dc; --accent: #2f5d8a; --accent-text: #ffffff; --tag: #eef2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17181a; --card: #202124; --text: #ececee; --muted: #a3a3ab;
+            --line: #33343a; --accent: #7fb0e0; --accent-text: #10161c; --tag: #2a2d33; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 2rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .lead { color: var(--muted); margin: 0 0 32px; max-width: 60ch; }
+  h2 { font-size: 1.1rem; margin: 40px 0 12px; color: var(--muted); font-weight: 600; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .card h3 { margin: 0; font-size: 1.2rem; }
+  .card p { margin: 0; color: var(--muted); flex: 1; }
+  .meta { font-size: 0.85rem; color: var(--muted); }
+  .tag { display: inline-block; background: var(--tag); border-radius: 6px; padding: 1px 8px;
+         font-size: 0.8rem; margin-right: 4px; }
+  .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .btn { background: var(--accent); color: var(--accent-text); text-decoration: none;
+         padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; }
+  .btn:hover { filter: brightness(1.08); }
+  .link { color: var(--accent); font-size: 0.9rem; }
+  .note { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 16px 20px; margin-top: 40px; color: var(--muted); font-size: 0.92rem; }
+  .note strong { color: var(--text); }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Small Windows apps</h1>
+  <p class="lead">Free tools I've built for my own work and share with anyone who finds them useful.
+    Most are portable: download, unzip and run. No installation and no admin rights needed.</p>
+
+  <div id="sections"></div>
+
+  <div class="note">
+    <strong>"Windows protected your PC"?</strong> The apps aren't code-signed yet, so Windows SmartScreen
+    may warn the first time. Click <em>More info</em> → <em>Run anyway</em>. All source code is
+    public on GitHub if you want to check what a program does.
+  </div>
+
+  <footer>Sebastian Ibstedt · <a class="link" href="https://github.com/ibst1">github.com/ibst1</a></footer>
+</main>
+
+<script>
+// One entry per app. "asset" is a regex matched against the latest release's files;
+// the page asks GitHub for the newest release, so it never needs updating on a new version.
+// listed: false keeps an app off the page until its repo is public (a private repo's links are 404s).
+const APPS = [
+  { section: "Typing and keyboard", name: "Expanto", repo: "expanto", listed: true, asset: /\.zip$/,
+    text: "Phrase expander with encryption, AI-based categorization and dynamic fields.", tags: ["AutoHotkey"] },
+  { section: "Typing and keyboard", name: "Encore", repo: "encore", listed: true, asset: /\.zip$/,
+    text: "Tray macro recorder: record keys, mouse and window switches, then play them back.", tags: ["AutoHotkey"] },
+  { section: "Typing and keyboard", name: "NumDotSwitch", repo: "numdotswitch", listed: true, asset: /\.zip$/,
+    text: "Switch what the numpad decimal key types: comma or period.", tags: ["AutoHotkey"] },
+  { section: "Typing and keyboard", name: "Sostenuto", repo: "sostenuto", listed: false, asset: /\.zip$/,
+    text: "Turns CapsLock and the Copilot key into ordinary modifiers, with per-key layers.", tags: ["AutoHotkey"] },
+
+  { section: "Windows and files", name: "DalSegno", repo: "dalsegno", listed: true, asset: /\.zip$/,
+    text: "Window manager for Windows 11: windows return to their saved place on the right monitor and virtual desktop.", tags: ["AutoHotkey"] },
+  { section: "Windows and files", name: "Reprise", repo: "reprise", listed: false, asset: /\.zip$/,
+    text: "Timestamped backup, archive and restore for files you select in Explorer.", tags: ["Explorer"] },
+  { section: "Windows and files", name: "Segue", repo: "segue", listed: true, asset: /\.zip$/,
+    text: "Right-click a link in Edge and send it to another browser window.", tags: ["Edge extension"] },
+
+  { section: "Two computers", name: "Unisono", repo: "unisono", listed: false, asset: /^Unisono.*\.(zip|exe)$/,
+    text: "Two-way sync of Google Drive, Box, Synology NAS and folders, with files on demand.", tags: ["Beta"] },
+  { section: "Two computers", name: "Glissando", repo: "glissando", listed: false, asset: /\.(zip|exe)$/,
+    text: "One keyboard and mouse for two Windows PCs over Bluetooth, with no network and no admin needed.", tags: ["Beta"] },
+
+  { section: "Writing and research", name: "critic-export", repo: "critic-export", listed: false, asset: /\.zip$/,
+    text: "Markdown with CriticMarkup and Zotero citations to Word with real tracked changes and comments.", tags: ["Pandoc", "Obsidian"] },
+  { section: "Writing and research", name: "Attacca", repo: "attacca", listed: false, asset: /\.zip$/,
+    text: "Open files from Explorer in the right Obsidian vault.", tags: ["Obsidian"] },
+];
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function card(app) {
+  const page = `https://github.com/ibst1/${app.repo}`;
+  return `<article class="card" id="${app.repo}">
+    <h3>${esc(app.name)}</h3>
+    <p>${esc(app.text)}</p>
+    <div>${app.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+    <div class="actions">
+      <a class="btn" href="${page}#readme">See on GitHub</a>
+      <a class="link" href="${page}#readme">How it works</a>
+    </div>
+    <div class="meta"></div>
+  </article>`;
+}
+
+const SHOWN = APPS.filter(a => a.listed);
+const sections = [...new Set(SHOWN.map(a => a.section))];
+document.getElementById("sections").innerHTML = sections.map(s =>
+  `<h2>${esc(s)}</h2><div class="grid">${SHOWN.filter(a => a.section === s).map(card).join("")}</div>`
+).join("");
+
+// Point each button straight at the file in the newest release. An app without a release, or
+// a GitHub that can't be reached, keeps the button pointing at the repo's README.
+for (const app of SHOWN) {
+  fetch(`https://api.github.com/repos/ibst1/${app.repo}/releases/latest`)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(rel => {
+      const file = rel.assets.find(a => app.asset.test(a.name));
+      const el = document.getElementById(app.repo);
+      if (!file) return;
+      el.querySelector(".btn").href = file.browser_download_url;
+      el.querySelector(".btn").textContent = `Download ${rel.tag_name}`;
+      const mb = (file.size / 1048576).toFixed(1);
+      const date = rel.published_at.slice(0, 10);
+      el.querySelector(".meta").textContent = `${file.name} · ${mb} MB · ${date}`;
+    })
+    .catch(() => {});
+}
+</script>
+</body>
+</html>
