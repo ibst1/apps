@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- Opens a note in Obsidian from an ordinary https link: apps.ibstedt.net/obsidian#vault=F&file=Folder/Note
+     Some apps (Todoist on Android) don't pass obsidian:// links on whole, so Obsidian opens whatever was open last;
+     an https link they do. The note's vault and path are after "#", which the browser never sends to a server. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Open in Obsidian</title>
+<style>
+  :root { --bg: #faf9f6; --card: #ffffff; --text: #1d1d1f; --muted: #5f5f66; --line: #e4e2dc; --accent: #7c5cd6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17181a; --card: #202124; --text: #ececee; --muted: #a3a3ab; --line: #34353a; --accent: #9d82ec; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 16px; }
+  main { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+  h1 { font-size: 19px; margin: 0 0 4px; overflow-wrap: anywhere; }
+  p { color: var(--muted); margin: 0 0 16px; overflow-wrap: anywhere; font-size: 14px; }
+  a.open { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
+    border-radius: 12px; padding: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="name">Open in Obsidian</h1>
+  <p id="where"></p>
+  <a class="open" id="open" href="#">Open in Obsidian</a>
+</main>
+<script>
+  const q = new URLSearchParams(location.hash.slice(1));
+  const vault = q.get("vault") || "", file = q.get("file") || "";
+  const name = document.getElementById("name"), where = document.getElementById("where"), open = document.getElementById("open");
+  if (!vault) {
+    name.textContent = "No note given";
+    where.textContent = "This page opens a note in Obsidian: …/obsidian#vault=<vault>&file=<folder/note>";
+    open.hidden = true;
+  } else {
+    const uri = "obsidian://open?vault=" + encodeURIComponent(vault) + (file ? "&file=" + encodeURIComponent(file) : "");
+    name.textContent = file ? file.split("/").pop() : vault;
+    where.textContent = file ? `${vault} · ${file}` : `The vault ${vault}`;
+    open.href = uri;
+    location.replace(uri); // straight on; the button is there if the browser wants a tap first
+  }
+</script>
+</body>
+</html>
