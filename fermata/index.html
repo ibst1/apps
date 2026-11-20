@@ -57,6 +57,10 @@
   ul.files li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
   ul.files li:first-child { border-top: 0; }
   ul.files .name { flex: 1 1 260px; overflow-wrap: anywhere; }
+  .fstat { color: var(--muted); font-size: .88rem; }
+  .fstat.rec { color: var(--rec); font-weight: 600; }
+  .fstat.warn { color: var(--warn); }
+  .fstat.ok { color: var(--accent); }
   .hidden { display: none !important; }
   .dlcard { border: 2px solid var(--accent); }
   a.btnlink { display: block; text-align: center; text-decoration: none; border-radius: 10px; font-weight: 700; box-sizing: border-box; }
@@ -388,7 +392,9 @@ class Compositor {
     this.readers[key] = null;
     this.frames[key]?.close(); this.frames[key] = null;
     if (!track || track.readyState === "ended") { this.render(true); return; }
-    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    // maxBufferSize: frames that arrive close together are all kept (the default keeps only the
+    // newest one, which made animations judder when several frames arrived at once)
+    const reader = new MediaStreamTrackProcessor({ track, maxBufferSize: 30 }).readable.getReader();
     this.readers[key] = reader;
     (async () => {
       for (;;) {
@@ -398,7 +404,8 @@ class Compositor {
         this.frames[key]?.close(); this.frames[key] = value;
         // Every screen frame is drawn (animations keep their full frame rate). Camera frames
         // only drive the output while the screen is still (a static slide sends few frames).
-        if (key === "screen") { this.lastScreen = performance.now(); this.render(true); }
+        // Frames from Fermata for Windows keep their capture time (even pace for animations)
+        if (key === "screen") { this.lastScreen = performance.now(); this.render(true, this.useSrcTs ? value.timestamp : undefined); }
         else if (performance.now() - (this.lastScreen || 0) > 40) this.render();
       }
     })();
@@ -408,10 +415,14 @@ class Compositor {
     const dw = frame.displayWidth * s, dh = frame.displayHeight * s;
     this.g.drawImage(frame, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   }
-  render(force) {
+  render(force, srcTs) {
     const now = performance.now();
-    if (!force && now - this.last < 1000 / 31) return;
-    if (this.out.desiredSize !== null && this.out.desiredSize <= 0) return; // encoder busy
+    // Screen frames (force) are never skipped – skipping them made animations judder.
+    // Camera-only updates are limited to ~30/s and skipped while the encoder is busy.
+    if (!force) {
+      if (now - this.last < 1000 / 31) return;
+      if (this.out.desiredSize !== null && this.out.desiredSize <= 0) return;
+    }
     this.last = now;
     const { screen, cam } = this.frames, W = this.canvas.width, H = this.canvas.height, g = this.g;
     g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
@@ -423,7 +434,10 @@ class Compositor {
       const x = c.endsWith("r") ? W - cw - m : m, y = c.startsWith("b") ? H - ch - m : m;
       g.drawImage(cam, x, y, cw, ch);
     }
-    this.out.write(new VideoFrame(this.canvas, { timestamp: Math.round(now * 1000) })).catch(() => {});
+    let ts = srcTs ?? Math.round(now * 1000);
+    if (ts <= (this.lastTs || 0)) ts = this.lastTs + 1;   // timestamps must always move forward
+    this.lastTs = ts;
+    this.out.write(new VideoFrame(this.canvas, { timestamp: ts })).catch(() => {});
   }
   stop() {
     for (const k of Object.keys(this.readers)) this.setSource(k, null);
@@ -617,6 +631,7 @@ async function startRecording(screen) {
     const known = s.width && s.height ? s : (screen === helperGen && helperSize) ? helperSize : null; // helper track: size of its frames
     const w = known ? known.width : 1920, h = known ? known.height : 1080;
     comp = new Compositor(w - (w % 2), h - (h % 2));
+    comp.useSrcTs = screen === helperGen;          // the helper's frames carry their capture time
     comp.setSource("screen", screen);
     comp.setSource("cam", camTrack);
     video = comp.track;
@@ -660,6 +675,7 @@ async function startRecording(screen) {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   window.addEventListener("beforeunload", guard);
   updateUi(); sendStatus();
+  setTimeout(refreshFiles, 1500);                   // show "● Spelas in nu" in the list
 }
 function updateRecInfo() {
   const s = recScreen?.getSettings() || {};
@@ -700,45 +716,117 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
 
+// Recordings are written to this computer while they run (nothing is uploaded). Each row says
+// what state the file is in: recording now / recording in another tab / interrupted / empty / done
+// (with length), and "Spara fil" shows how far the copy has come.
+const prevSizes = new Map(), durCache = new Map();
+let filesTimer = 0, saving = 0;
+const savedNames = () => { try { return new Set(JSON.parse(store.get("saved") || "[]")); } catch { return new Set(); } };
+function markSaved(name) { const s = savedNames(); s.add(name); store.set("saved", JSON.stringify([...s].slice(-200))); }
+function fmtDur(sec) {
+  if (!isFinite(sec) || sec <= 0) return "";
+  const s = Math.round(sec), p = (n) => String(n).padStart(2, "0");
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}` : `${Math.floor(s / 60)}:${p(s % 60)}`;
+}
+function fileDuration(f) {
+  return new Promise((res) => {
+    const v = document.createElement("video"), url = URL.createObjectURL(f);
+    let finished = false;
+    const done = (d) => { if (finished) return; finished = true; URL.revokeObjectURL(url); v.removeAttribute("src"); res(d); };
+    v.preload = "metadata"; v.muted = true;
+    v.onloadedmetadata = () => {
+      if (v.duration !== Infinity) return done(v.duration);
+      v.ontimeupdate = () => done(v.duration); v.currentTime = 1e9;  // fragmented MP4: seek to the end to learn the length
+    };
+    v.onerror = () => done(NaN);
+    setTimeout(() => done(NaN), 5000);
+    v.src = url;
+  });
+}
 async function refreshFiles() {
+  if (saving) return;                              // don't rebuild the list under a running copy
   const ul = $("files");
   let root;
   try { root = await navigator.storage.getDirectory(); } catch { return; }
   const items = [];
-  for await (const [name, h] of root.entries()) {
-    if (h.kind !== "file" || (rec && name === fileName + ".pågår")) continue;
-    items.push({ name, f: await h.getFile() });
-  }
-  items.sort((a, b) => b.name.localeCompare(a.name));
-  ul.innerHTML = "";
-  if (!items.length) { ul.innerHTML = '<li class="muted">Inga inspelningar ännu.</li>'; return; }
+  for await (const [name, h] of root.entries()) if (h.kind === "file") items.push({ name, f: await h.getFile() });
+  items.sort((a, b) => b.name.replace(/\.pågår$/, "").localeCompare(a.name.replace(/\.pågår$/, "")));
+  const saved = savedNames();
+  let busy = false;
+  const rows = [];
   for (const { name, f } of items) {
-    const clean = name.replace(/\.pågår$/, ""); // left over after a crash: still playable
+    const clean = name.replace(/\.pågår$/, "");
+    const partial = clean !== name;
+    const mine = !!rec && name === fileName + ".pågår";
+    const growing = partial && !mine && prevSizes.has(name) && f.size > prevSizes.get(name);
+    prevSizes.set(name, f.size);
+    let status, cls = "", canSave = true;
+    if (mine) { status = `● Spelas in nu · ${fmtTime(Date.now() - startTime)}`; cls = "rec"; canSave = false; busy = true; }
+    else if (growing) { status = "● Spelas in i en annan flik"; cls = "rec"; canSave = false; busy = true; }
+    else if (partial) { status = "Avbruten – det inspelade går att spara"; cls = "warn"; if (!prevSizes.has(name + "#seen")) busy = true; prevSizes.set(name + "#seen", 1); }
+    else if (f.size < 60_000) { status = "Tom"; cls = "warn"; }
+    else {
+      const key = name + ":" + f.size;
+      if (!durCache.has(key)) durCache.set(key, await fileDuration(f));
+      const d = fmtDur(durCache.get(key));
+      status = `Klar${d ? " · " + d : ""}${saved.has(clean) ? " · Sparad ✓" : ""}`;
+      cls = saved.has(clean) ? "ok" : "";
+    }
+    rows.push({ name, clean, f, status, cls, canSave });
+  }
+  ul.innerHTML = "";
+  if (!rows.length) { ul.innerHTML = '<li class="muted">Inga inspelningar ännu.</li>'; }
+  for (const r of rows) {
     const li = document.createElement("li");
     const span = document.createElement("span"); span.className = "name";
-    span.textContent = `${clean} – ${fmtSize(f.size)}` + (clean !== name ? " (avbruten)" : "");
+    span.innerHTML = `<span></span><br><small class="fstat ${r.cls}"></small>`;
+    span.firstChild.textContent = r.clean;
+    span.querySelector(".fstat").textContent = `${fmtSize(r.f.size)} · ${r.status}`;
     const save = document.createElement("button"); save.className = "primary"; save.textContent = "Spara fil";
-    save.onclick = () => saveFile(clean, f);
+    save.disabled = !r.canSave;
+    save.onclick = () => saveFile(r.clean, r.f, li);
     const del = document.createElement("button"); del.className = "ghost"; del.textContent = "Ta bort";
+    del.disabled = !r.canSave;
     del.onclick = async () => {
-      if (!confirm(`Ta bort ”${clean}” från webbläsarens lagring? Har du inte sparat filen går den inte att få tillbaka.`)) return;
-      await root.removeEntry(name); refreshFiles();
+      if (!confirm(`Ta bort ”${r.clean}” från webbläsarens lagring? Har du inte sparat filen går den inte att få tillbaka.`)) return;
+      await root.removeEntry(r.name); refreshFiles();
     };
     li.append(span, save, del); ul.append(li);
   }
+  // Keep the list live while something is being written
+  clearTimeout(filesTimer);
+  if (busy) filesTimer = setTimeout(refreshFiles, 2000);
 }
-async function saveFile(name, f) {
+async function saveFile(name, f, li) {
+  const st = li?.querySelector(".fstat"), btn = li?.querySelector("button.primary");
+  const say = (t) => { if (st) { st.textContent = `${fmtSize(f.size)} · ${t}`; st.className = "fstat"; } };
   if (window.showSaveFilePicker) {
+    let h = null;
     try {
       const ext = name.split(".").pop();
-      const h = await showSaveFilePicker({ suggestedName: name,
+      h = await showSaveFilePicker({ suggestedName: name,
         types: [{ description: "Video", accept: { [ext === "mp4" ? "video/mp4" : "video/webm"]: ["." + ext] } }] });
-      await f.stream().pipeTo(await h.createWritable());
-      alert("Sparad.");
-      return;
     } catch (e) { if (e.name === "AbortError") return; }
+    if (h) {
+      saving++; if (btn) btn.disabled = true;
+      try {
+        const w = await h.createWritable(), reader = f.stream().getReader();
+        let n = 0, last = -1;
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          await w.write(value); n += value.length;
+          const pct = Math.floor(n * 100 / Math.max(1, f.size));
+          if (pct !== last) { last = pct; say(`Sparar … ${pct} %`); }
+        }
+        await w.close();
+        markSaved(name); say("Sparad ✓"); if (st) st.className = "fstat ok";
+      } catch (e) { say("Kunde inte sparas – försök igen"); if (st) st.className = "fstat warn"; }
+      finally { saving--; if (btn) btn.disabled = false; }
+      return;
+    }
   }
-  download(f, name);
+  download(f, name); markSaved(name); say("Hämtas av webbläsaren – se Hämtade filer");
 }
 
 // ================= Technician: receive from the lecturer =================
@@ -1281,6 +1369,7 @@ function helperStart() {
     helperGen = new MediaStreamTrackGenerator({ kind: "video" });
     helperWriter = helperGen.writable.getWriter();
     helperSize = null;                                    // set by the first frame; then helperUse() runs
+    helperTsOffset = null; helperLastTs = 0;
   }
   helperUi();
 }
@@ -1300,18 +1389,41 @@ function helperEnd() {
   try { g.stop(); } catch {}
   helperUi();
 }
-async function helperFrame(buf) {
-  if (!helperWriter || helperBusy > 1) return;          // still drawing the previous one: skip (newest wins)
+// Each message: 8 bytes capture time (µs, 0 = a repeated still frame) + JPEG.
+// Several frames are decoded at once, but written strictly in order, and each frame keeps the time
+// Windows captured it (moved onto this page's clock) – so delays on the way don't become judder.
+var helperChain = Promise.resolve(), helperTsOffset = null, helperLastTs = 0;
+function helperFrame(buf) {
+  if (!helperWriter || helperBusy > 12) return;         // very far behind: skip
   helperBusy++;
-  try {
-    const bmp = await createImageBitmap(new Blob([buf], { type: "image/jpeg" }));
-    const vf = new VideoFrame(bmp, { timestamp: Math.round(performance.now() * 1000) });
-    const first = !helperSize;
-    if (first) helperSize = { width: bmp.width, height: bmp.height };
-    bmp.close();
-    if (helperWriter) { await helperWriter.write(vf); helperCount++; } else vf.close();
-    if (first) helperUse();                               // start sending/recording once the size is known
-  } catch {} finally { helperBusy--; }
+  const capUs = Number(new DataView(buf).getBigInt64(0, true));
+  const decoded = createImageBitmap(new Blob([new Uint8Array(buf, 8)], { type: "image/jpeg" }));   // starts now, in parallel
+  helperChain = helperChain.then(async () => {
+    let bmp;
+    try { bmp = await decoded; } catch { return; }
+    try {
+      const nowUs = Math.round(performance.now() * 1000);
+      let ts = nowUs;
+      if (capUs > 0) {
+        if (helperTsOffset === null || Math.abs(capUs + helperTsOffset - nowUs) > 2_000_000) helperTsOffset = nowUs - capUs; // (re)sync
+        ts = capUs + helperTsOffset;
+      }
+      if (ts <= helperLastTs) ts = helperLastTs + 1000;   // always forward
+      helperLastTs = ts;
+      // Lecturer: the picture goes on to the technician over WebRTC, which only takes the newest
+      // frame. So hand the frames over at the pace they were captured (0.1 s behind, as a buffer).
+      if (role() === "lecturer" && capUs > 0) {
+        const wait = (ts + 100_000 - Math.round(performance.now() * 1000)) / 1000;
+        if (wait > 1 && wait < 1000) await new Promise((r) => setTimeout(r, wait));
+      }
+      const first = !helperSize;
+      if (first) helperSize = { width: bmp.width, height: bmp.height };
+      const vf = new VideoFrame(bmp, { timestamp: ts });
+      bmp.close();
+      if (helperWriter) { await helperWriter.write(vf); helperCount++; } else vf.close();
+      if (first) helperUse();                             // start sending/recording once the size is known
+    } catch {}
+  }).finally(() => { helperBusy--; });
 }
 setInterval(() => { helperFps = helperCount / 2; helperCount = 0; if (helperOk) helperUi(); }, 2000);
 // Tell Fermata for Windows whether a recording is running, so it can show a red "recording" badge

@@ -14,12 +14,13 @@ namespace Fermata;
 /// <summary>
 /// Captures one window with Windows Graphics Capture: WITHOUT the mouse pointer and without
 /// the yellow border, also while other windows (the presenter view) lie on top of it.
-/// Frames are copied to the CPU and JPEG-encoded on a few worker threads; the newest
-/// encoded frame is handed to <see cref="FrameReady"/> in order (older ones are dropped).
+/// Frames are copied to the CPU and JPEG-encoded on a few worker threads, then handed to
+/// <see cref="FrameReady"/> strictly in capture order (a frame that finishes early waits for the
+/// one before it), together with the time Windows captured it – so animations keep an even pace.
 /// </summary>
 sealed class WindowCapture : IDisposable
 {
-    public event Action<byte[], int, int> FrameReady;   // jpeg, width, height
+    public event Action<byte[], int, int, long> FrameReady;   // jpeg, width, height, capture time (µs)
     public int Width { get; private set; }
     public int Height { get; private set; }
     public int Fps => _fps;
@@ -33,7 +34,8 @@ sealed class WindowCapture : IDisposable
     ID3D11Texture2D _staging;
     Windows.Graphics.SizeInt32 _size;
     readonly object _lock = new();
-    long _seq, _lastSent;
+    long _seq, _nextOut = 1;
+    readonly Dictionary<long, (byte[] jpeg, int w, int h, long ts)> _done = new();   // encoded, waiting for their turn
     int _busy, _fps, _frames;
     DateTime _fpsStart = DateTime.UtcNow;
     long _lastFrameTicks;
@@ -115,16 +117,17 @@ sealed class WindowCapture : IDisposable
             }
             finally { _context.Unmap(_staging, 0); }
         }
+        long ts = frame.SystemRelativeTime.Ticks / 10;          // when Windows captured it, in µs
         long seq = Interlocked.Increment(ref _seq);
         Interlocked.Increment(ref _busy);
-        ThreadPool.QueueUserWorkItem(_ => Encode(seq, bgra, w, h, stride));
+        ThreadPool.QueueUserWorkItem(_ => Encode(seq, bgra, w, h, stride, ts));
     }
 
-    void Encode(long seq, byte[] bgra, int w, int h, int stride)
+    void Encode(long seq, byte[] bgra, int w, int h, int stride, long ts)
     {
+        byte[] jpeg = null; int ow = w, oh = h;
         try
         {
-            byte[] jpeg; int ow = w, oh = h;
             var handle = GCHandle.Alloc(bgra, GCHandleType.Pinned);
             try
             {
@@ -147,19 +150,26 @@ sealed class WindowCapture : IDisposable
                 jpeg = ms.ToArray();
             }
             finally { handle.Free(); }
-            lock (_lock)
+        }
+        catch (Exception e) { Log.Write("encode: " + e.Message); jpeg = null; }
+        // Hand frames on in capture order: this one may have to wait for an earlier one still encoding.
+        // Invoked inside the lock so two threads can never hand frames on out of order
+        // (the handler only queues the send, so this is quick).
+        lock (_lock)
+        {
+            _done[seq] = (jpeg, ow, oh, ts);
+            while (_done.Remove(_nextOut, out var f))
             {
-                if (seq <= _lastSent) return;                   // a newer frame was already sent
-                _lastSent = seq;
-                Width = ow; Height = oh;
+                _nextOut++;
+                if (f.jpeg == null) continue;                    // failed to encode: skip it, keep the order
+                Width = f.w; Height = f.h;
                 _frames++;
                 var el = (DateTime.UtcNow - _fpsStart).TotalSeconds;
                 if (el >= 2) { _fps = (int)Math.Round(_frames / el); _frames = 0; _fpsStart = DateTime.UtcNow; }
+                try { FrameReady?.Invoke(f.jpeg, f.w, f.h, f.ts); } catch (Exception e) { Log.Write("frame handler: " + e.Message); }
             }
-            FrameReady?.Invoke(jpeg, ow, oh);
         }
-        catch (Exception e) { Log.Write("encode: " + e.Message); }
-        finally { Interlocked.Decrement(ref _busy); }
+        Interlocked.Decrement(ref _busy);
     }
 
     ID3D11Texture2D TextureFromSurface(IDirect3DSurface surface)

@@ -34,7 +34,8 @@ sealed class PageServer
         public bool Rec;                    // the page says a recording is running
         public long RecMs;                  // how long it has run, as of RecAt
         public DateTime RecAt;
-        public int Sending;                 // 1 while a frame is being sent (newer frames are skipped)
+        public int Sending;                 // 1 while the send loop runs
+        public readonly Queue<byte[]> Queue = new();   // frames waiting to be sent, in order
         public readonly SemaphoreSlim Gate = new(1, 1);
     }
 
@@ -165,19 +166,49 @@ sealed class PageServer
 
     public void Broadcast(object o) { foreach (var c in Clients) _ = SendJson(c, o); }
 
-    /// <summary>Send a frame to the pages that want it; a page still busy with the previous frame skips this one.</summary>
-    public void SendFrame(byte[] jpeg, Func<Client, bool> wants)
+    /// <summary>
+    /// Queue a frame for the pages that want it. Each page has a short queue sent strictly in order;
+    /// only if a page falls far behind is its OLDEST queued frame dropped (never a random one).
+    /// Message = 8 bytes capture time in µs (little endian, 0 = "no time, use your clock") + JPEG.
+    /// </summary>
+    public void SendFrame(byte[] jpeg, long captureUs, Func<Client, bool> wants)
     {
+        byte[] msg = null;
         foreach (var c in Clients)
         {
-            if (!wants(c) || Interlocked.CompareExchange(ref c.Sending, 1, 0) != 0) continue;
-            _ = Task.Run(async () =>
+            if (!wants(c)) continue;
+            msg ??= BuildFrame(jpeg, captureUs);
+            lock (c.Queue)
             {
-                await c.Gate.WaitAsync();
-                try { if (c.Ws.State == WebSocketState.Open) await c.Ws.SendAsync(jpeg, WebSocketMessageType.Binary, true, CancellationToken.None); }
-                catch { }
-                finally { c.Gate.Release(); Interlocked.Exchange(ref c.Sending, 0); }
-            });
+                c.Queue.Enqueue(msg);
+                while (c.Queue.Count > 6) c.Queue.Dequeue();    // far behind: drop the oldest
+            }
+            if (Interlocked.CompareExchange(ref c.Sending, 1, 0) == 0) _ = Task.Run(() => SendLoop(c));
         }
+    }
+
+    static byte[] BuildFrame(byte[] jpeg, long us)
+    {
+        var m = new byte[8 + jpeg.Length];
+        BitConverter.TryWriteBytes(m.AsSpan(0, 8), us);
+        Buffer.BlockCopy(jpeg, 0, m, 8, jpeg.Length);
+        return m;
+    }
+
+    async Task SendLoop(Client c)
+    {
+        try
+        {
+            for (;;)
+            {
+                byte[] m;
+                lock (c.Queue) { if (c.Queue.Count == 0) { Interlocked.Exchange(ref c.Sending, 0); return; } m = c.Queue.Dequeue(); }
+                await c.Gate.WaitAsync();
+                try { if (c.Ws.State == WebSocketState.Open) await c.Ws.SendAsync(m, WebSocketMessageType.Binary, true, CancellationToken.None); }
+                catch { }
+                finally { c.Gate.Release(); }
+            }
+        }
+        catch { Interlocked.Exchange(ref c.Sending, 0); }
     }
 }

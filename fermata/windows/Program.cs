@@ -107,9 +107,9 @@ static class Program
             {
                 _hwnd = h;
                 _capture = new WindowCapture(h);
-                _capture.FrameReady += (jpeg, w, hh) =>
+                _capture.FrameReady += (jpeg, w, hh, ts) =>
                 {
-                    _last = jpeg; _lastAt = DateTime.UtcNow; _server.SendFrame(jpeg, Wants);
+                    _last = jpeg; _lastAt = DateTime.UtcNow; _server.SendFrame(jpeg, ts, Wants);
                     if (Dump != null) try { File.WriteAllBytes(Dump, jpeg); } catch { }   // --dump <file>: for testing
                 };
                 Log.Write($"Slideshow found: {title}");
@@ -129,7 +129,7 @@ static class Program
         // page that connects during a still slide gets a picture and the recording never stalls.
         var last = _last;
         if (_capture != null && last != null && DateTime.UtcNow - _lastAt > TimeSpan.FromSeconds(1))
-        { _lastAt = DateTime.UtcNow; _server.SendFrame(last, Wants); }
+        { _lastAt = DateTime.UtcNow; _server.SendFrame(last, 0, Wants); }   // repeat: no capture time
 
         string role = _main?.Role ?? "";
         string mode = role switch { "lecturer" => "Föreläsare", "both" => "Båda", "tech" => "Tekniker", _ => "" };
