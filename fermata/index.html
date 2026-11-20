@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fermata – inspelning</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+    --accent: #2f6f5e; --accent-text: #ffffff; --rec: #c62828; --warn: #8a5a00; --warn-bg: #fff4dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --card: #1f1f1d; --text: #ecebe7; --muted: #a09e98; --line: #34332f;
+      --accent: #5fae97; --accent-text: #0e1a16; --rec: #ef5350; --warn: #f2c46b; --warn-bg: #3a2f17;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  select, input[type=text] { width: 100%; padding: 8px; font: inherit; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--bg); color: var(--text); }
+  input.code { font-size: 2rem; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+  .check input { margin-top: 5px; }
+  .meter { height: 14px; border-radius: 7px; background: var(--line); overflow: hidden; margin-top: 8px; }
+  .meter > div { height: 100%; width: 0; background: var(--accent); transition: width 80ms linear; }
+  .meter.hot > div { background: var(--rec); }
+  .srcinfo { font-weight: 600; margin-top: 6px; }
+  .srcinfo.missing { color: var(--warn); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 20px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .primary { background: var(--accent); color: var(--accent-text); }
+  .stop { background: var(--rec); color: #fff; }
+  .ghost { background: transparent; color: var(--text); border: 1px solid var(--line); padding: 6px 12px; font-weight: 500; }
+  .big { width: 100%; font-size: 1.15rem; padding: 16px; margin-top: 12px; }
+  .status { display: flex; align-items: center; gap: 12px; font-size: 1.1rem; margin: 4px 0; flex-wrap: wrap; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--rec); animation: pulse 1.2s infinite; flex: none; }
+  .dot.idle { background: var(--muted); animation: none; }
+  .dot.ok { background: var(--accent); animation: none; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.6rem; }
+  .bigcode { font-size: 3rem; font-weight: 800; letter-spacing: .25em; font-variant-numeric: tabular-nums; text-align: center; margin: 4px 0; }
+  video { width: 100%; border-radius: 8px; background: #000; margin-top: 12px; max-height: 320px; }
+  video.cam { width: 220px; max-width: 100%; }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .row { display: grid; grid-template-columns: 1fr 160px; gap: 8px; align-items: end; }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+  ul.files { list-style: none; padding: 0; margin: 0; }
+  ul.files li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+  ul.files li:first-child { border-top: 0; }
+  ul.files .name { flex: 1 1 260px; overflow-wrap: anywhere; }
+  .hidden { display: none !important; }
+  ol { padding-left: 20px; margin: 0; }
+  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .roles label { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .roles label:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .roles small { display: block; color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fermata</h1>
+  <p class="sub">Spela in presentationsskärm, ljud och kamera i webbläsaren – inget att installera.</p>
+
+  <div id="unsupported" class="card note hidden">
+    Den här webbläsaren kan inte dela eller spela in skärmen. Använd Chrome eller Edge på en dator.
+  </div>
+
+  <section class="card">
+    <h2>Jag är …</h2>
+    <div class="roles">
+      <label class="check"><input type="radio" name="role" value="lecturer"> <span><b>Föreläsare</b><small>Min dator visar presentationen. Skärmen skickas till teknikern.</small></span></label>
+      <label class="check"><input type="radio" name="role" value="tech"> <span><b>Tekniker</b><small>Min dator spelar in och väljer ljud och kamera.</small></span></label>
+      <label class="check"><input type="radio" name="role" value="both" checked> <span><b>Båda</b><small>Presentation och inspelning på samma dator.</small></span></label>
+    </div>
+  </section>
+
+  <!-- ===== Lecturer ===== -->
+  <section id="lect" class="card hidden">
+    <h2>Skicka din skärm till teknikern</h2>
+    <div id="lectsetup">
+      <label for="lcode">Kod från teknikern</label>
+      <input id="lcode" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
+      <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
+      <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
+      <ol class="muted" style="margin-top:12px">
+        <li>Starta bildspelet i PowerPoint (F5).</li>
+        <li>Klicka nedan och välj fliken <b>Hela skärmen</b> → den skärm som visar bildspelet.</li>
+        <li>Tillåt mikrofon/kamera om webbläsaren frågar.</li>
+        <li>Raden ”delar din skärm” kan du dölja med <b>Dölj</b>.</li>
+      </ol>
+      <button id="share" class="primary big">Dela skärmen</button>
+    </div>
+    <div id="lectlive" class="hidden">
+      <div class="status"><div class="dot ok" id="ldot"></div><span id="lstatus">Ansluter …</span></div>
+      <p class="muted" id="lmedia"></p>
+      <p class="muted">Inget sparas på den här datorn. Låt fliken vara öppen tills föreläsningen är slut.</p>
+      <button id="unshare" class="ghost">Sluta dela</button>
+    </div>
+    <p class="note hidden" id="lerr"></p>
+  </section>
+
+  <!-- ===== Technician ===== -->
+  <section id="techcode" class="card hidden">
+    <h2>Kod till föreläsaren</h2>
+    <div class="bigcode" id="code">······</div>
+    <div class="status"><div class="dot idle" id="tdot"></div><span id="tstatus">Startar …</span></div>
+    <p class="muted" id="tstats"></p>
+    <video id="remote" class="hidden" muted playsinline></video>
+    <p class="muted"><button class="ghost" id="newcode">Ny kod</button></p>
+  </section>
+
+  <!-- ===== Sources (technician + both) ===== -->
+  <section id="setup" class="card hidden">
+    <h2>Ljud och kamera</h2>
+    <label for="asrc">Ljud</label>
+    <select id="asrc"></select>
+    <div class="meter" id="meter" title="Ljudnivå"><div id="level"></div></div>
+    <div class="srcinfo" id="ainfo">Inget ljud valt</div>
+    <label class="check" id="sysbox"><input type="checkbox" id="sysaudio"> <span>Spela även in datorns ljud (filmklipp i presentationen). Fungerar när du delar <b>hela skärmen</b>.</span></label>
+
+    <div class="row">
+      <div><label for="vsrc">Kamera</label><select id="vsrc"></select></div>
+      <div><label for="corner">Placering</label>
+        <select id="corner">
+          <option value="br">Nere till höger</option><option value="bl">Nere till vänster</option>
+          <option value="tr">Uppe till höger</option><option value="tl">Uppe till vänster</option>
+        </select></div>
+    </div>
+    <div class="srcinfo" id="vinfo">Ingen kamera</div>
+    <video id="campv" class="cam hidden" muted playsinline></video>
+    <p class="muted hidden" id="nocomp">Kamera i inspelningen kräver Chrome eller Edge.</p>
+
+    <label class="check" id="autobox"><input type="checkbox" id="autorec" checked> <span>Starta inspelningen automatiskt när föreläsarens skärm kommer in, och stoppa när den försvinner.</span></label>
+    <label for="quality">Bildkvalitet</label>
+    <select id="quality">
+      <option value="10000000">Hög – ca 4,5 GB per timme</option>
+      <option value="20000000">Mycket hög – för mycket animationer, ca 9 GB per timme</option>
+      <option value="5000000">Normal – ca 2,3 GB per timme</option>
+    </select>
+  </section>
+
+  <section id="startcard" class="card hidden">
+    <div id="bothhelp">
+      <ol class="muted">
+        <li>Starta bildspelet i PowerPoint (F5).</li>
+        <li>Klicka nedan och välj fliken <b>Hela skärmen</b> → den skärm som visar bildspelet.</li>
+      </ol>
+    </div>
+    <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
+  </section>
+
+  <section id="reccard" class="card hidden">
+    <div class="status"><div class="dot"></div><span>Spelar in</span><span class="time" id="time">0:00:00</span></div>
+    <div class="muted" id="recinfo"></div>
+    <video id="preview" muted playsinline></video>
+    <button id="stop" class="stop big">Stoppa inspelningen</button>
+    <p class="muted">Ljud och kamera kan bytas under inspelningen. Allt sparas löpande på den här datorn – stäng inte fliken förrän du har stoppat.</p>
+  </section>
+
+  <section id="filescard" class="card hidden">
+    <h2>Inspelningar på den här datorn</h2>
+    <ul class="files" id="files"><li class="muted">Inga inspelningar ännu.</li></ul>
+    <p class="muted">Filerna ligger i webbläsarens lagring tills du klickar <b>Spara fil</b>.</p>
+  </section>
+  <audio id="sink" muted></audio>
+</main>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const show = (id, on) => $(id).classList.toggle("hidden", !on);
+const TEST = new URLSearchParams(location.search).has("test");
+const ID_PREFIX = "fermata-v1-";
+const PEER_CONFIG = { debug: 1, config: { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "turn:eu-0.turn.peerjs.com:3478", username: "peerjs", credential: "peerjsp" },
+  { urls: "turn:us-0.turn.peerjs.com:3478", username: "peerjs", credential: "peerjsp" },
+] } };
+const SEND_MAX_BITRATE = 20_000_000;
+const CAN_COMPOSE = !!(window.MediaStreamTrackProcessor && window.MediaStreamTrackGenerator && window.OffscreenCanvas);
+
+// Chrome starts WebRTC video at a low bitrate and climbs slowly. On a local network we can
+// start high: add x-google bitrate hints (kbit/s) to every video codec in the SDP.
+function sdpBoost(sdp) {
+  return sdp.replace(/m=video[\s\S]*?(?=\r\nm=|$)/, (sec) => {
+    const hint = "x-google-min-bitrate=3000;x-google-start-bitrate=10000;x-google-max-bitrate=20000";
+    const pts = [...sec.matchAll(/a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\//g)].map((m) => m[1]);
+    for (const pt of pts) {
+      const re = new RegExp(`a=fmtp:${pt} (.*)`);
+      if (re.test(sec)) sec = sec.replace(re, (l, p) => p.includes("x-google") ? l : `a=fmtp:${pt} ${p};${hint}`);
+      else sec = sec.replace(new RegExp(`(a=rtpmap:${pt} [^\\r\\n]*)`), `$1\r\na=fmtp:${pt} ${hint}`);
+    }
+    return sec;
+  });
+}
+// Better audio over WebRTC: Opus at 128 kbit/s, no DTX
+function sdpAudio(sdp) {
+  return sdp.replace(/a=fmtp:(\d+) (minptime=\d+;useinbandfec=1[^\r\n]*)/g,
+    (l, pt, p) => p.includes("maxaveragebitrate") ? l : `a=fmtp:${pt} ${p};maxaveragebitrate=128000;usedtx=0`);
+}
+
+// ================= Disk writer (OPFS, crash-safe: flushed every chunk) =================
+const workerSrc = `
+let h = null, fh = null, pos = 0;
+onmessage = async (e) => {
+  const m = e.data;
+  try {
+    if (m.cmd === "open") {
+      const root = await navigator.storage.getDirectory();
+      fh = await root.getFileHandle(m.name, { create: true });
+      h = await fh.createSyncAccessHandle(); h.truncate(0); pos = 0;
+      postMessage({ ok: "open" });
+    } else if (m.cmd === "write") {
+      pos += h.write(new Uint8Array(m.buf), { at: pos }); h.flush();
+      postMessage({ ok: "write", size: pos });
+    } else if (m.cmd === "close") {
+      if (h) { h.flush(); h.close(); h = null; }
+      if (m.rename && fh && fh.move) { try { await fh.move(m.rename); } catch (err) {} }
+      postMessage({ ok: "close", size: pos });
+    }
+  } catch (err) { postMessage({ error: String(err) }); }
+};`;
+let writer = null, writerPending = Promise.resolve(), memChunks = null;
+function workerCall(msg) {
+  // Calls run strictly in order; msg may be a Promise of an ArrayBuffer (= write)
+  const w = writer;
+  writerPending = writerPending.catch(() => {}).then(async () => {
+    let m = await msg, transfer = [];
+    if (m instanceof ArrayBuffer) { transfer = [m]; m = { cmd: "write", buf: m }; }
+    return new Promise((res, rej) => {
+      w.onmessage = (e) => e.data.error ? rej(new Error(e.data.error)) : res(e.data);
+      w.postMessage(m, transfer);
+    });
+  });
+  return writerPending;
+}
+
+// ================= Helpers =================
+function pickMime() {
+  return ["video/mp4;codecs=avc1.640033,mp4a.40.2", "video/mp4;codecs=avc1,opus", "video/mp4",
+          "video/webm;codecs=h264,opus", "video/webm;codecs=vp9,opus", "video/webm"]
+    .find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+function stamp() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;
+}
+function fmtSize(b) { return b > 1e9 ? (b/1e9).toFixed(2).replace(".", ",") + " GB" : Math.round(b/1e6) + " MB"; }
+function fmtTime(ms) {
+  const s = Math.floor(ms/1000), p = (n) => String(n).padStart(2, "0");
+  return `${Math.floor(s/3600)}:${p(Math.floor(s/60)%60)}:${p(s%60)}`;
+}
+const store = {
+  get(k) { try { return localStorage.getItem("fermata." + k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem("fermata." + k, v); } catch {} },
+};
+const role = () => document.querySelector('input[name="role"]:checked').value;
+
+// ================= Audio bus: one source at a time → meter + (delay) → recording =================
+// The recording always uses bus.dest's track, so the source can change mid-recording.
+const bus = { ctx: null, dest: null, delay: null, analyser: null, src: null, extra: null };
+function ensureBus() {
+  if (bus.ctx) return;
+  bus.ctx = new AudioContext();
+  bus.dest = bus.ctx.createMediaStreamDestination();
+  bus.delay = bus.ctx.createDelay(2);
+  bus.analyser = bus.ctx.createAnalyser(); bus.analyser.fftSize = 1024;
+  bus.delay.connect(bus.dest);
+  const buf = new Float32Array(bus.analyser.fftSize);
+  const tick = () => {
+    bus.analyser.getFloatTimeDomainData(buf);
+    let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v));
+    $("level").style.width = (bus.src ? Math.min(100, Math.round(Math.sqrt(peak) * 110)) : 0) + "%";
+    $("meter").classList.toggle("hot", peak > 0.95);
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+// Audio may only start after a click; resume on any interaction
+document.addEventListener("pointerdown", () => bus.ctx?.state === "suspended" && bus.ctx.resume(), true);
+
+function setBusSource(stream, delaySec) {
+  ensureBus();
+  try { bus.src?.disconnect(); } catch {}
+  bus.src = null;
+  if (stream?.getAudioTracks().length) {
+    bus.src = bus.ctx.createMediaStreamSource(stream);
+    bus.src.connect(bus.analyser); bus.src.connect(bus.delay);
+  }
+  bus.delay.delayTime.value = Math.min(1.5, Math.max(0, delaySec || 0));
+}
+function setBusExtra(stream) { // screen audio in "both" mode
+  ensureBus();
+  try { bus.extra?.disconnect(); } catch {}
+  bus.extra = stream?.getAudioTracks().length ? bus.ctx.createMediaStreamSource(stream) : null;
+  bus.extra?.connect(bus.dest);
+}
+
+// ================= Video compositor: screen + camera corner → one track =================
+// Frame-driven (not timer-driven), so it keeps running when the tab is in the background.
+class Compositor {
+  constructor(w, h) {
+    this.gen = new MediaStreamTrackGenerator({ kind: "video" });
+    this.out = this.gen.writable.getWriter();
+    this.canvas = new OffscreenCanvas(w, h);
+    this.g = this.canvas.getContext("2d");
+    this.frames = { screen: null, cam: null };
+    this.readers = {};
+    this.last = 0;
+  }
+  get track() { return this.gen; }
+  setSource(key, track) {
+    this.readers[key]?.cancel().catch(() => {});
+    this.readers[key] = null;
+    this.frames[key]?.close(); this.frames[key] = null;
+    if (!track || track.readyState === "ended") { this.render(true); return; }
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    this.readers[key] = reader;
+    (async () => {
+      for (;;) {
+        const { value, done } = await reader.read().catch(() => ({ done: true }));
+        if (done) break;
+        if (this.readers[key] !== reader) { value.close(); break; }
+        this.frames[key]?.close(); this.frames[key] = value;
+        this.render();
+      }
+    })();
+  }
+  fit(frame, x, y, w, h) { // draw keeping aspect ratio
+    const s = Math.min(w / frame.displayWidth, h / frame.displayHeight);
+    const dw = frame.displayWidth * s, dh = frame.displayHeight * s;
+    this.g.drawImage(frame, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  }
+  render(force) {
+    const now = performance.now();
+    if (!force && now - this.last < 1000 / 61) return;
+    if (this.out.desiredSize !== null && this.out.desiredSize <= 0) return; // encoder busy
+    this.last = now;
+    const { screen, cam } = this.frames, W = this.canvas.width, H = this.canvas.height, g = this.g;
+    g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+    if (screen) this.fit(screen, 0, 0, W, H);
+    else { g.fillStyle = "#888"; g.font = `${Math.round(H/20)}px sans-serif`; g.textAlign = "center"; g.fillText("Väntar på skärmbild …", W/2, H/2); }
+    if (cam) {
+      const cw = Math.round(W * 0.22), ch = Math.round(cw * cam.displayHeight / cam.displayWidth), m = Math.round(W * 0.015);
+      const c = $("corner").value;
+      const x = c.endsWith("r") ? W - cw - m : m, y = c.startsWith("b") ? H - ch - m : m;
+      g.drawImage(cam, x, y, cw, ch);
+    }
+    this.out.write(new VideoFrame(this.canvas, { timestamp: Math.round(now * 1000) })).catch(() => {});
+  }
+  stop() {
+    for (const k of Object.keys(this.readers)) this.setSource(k, null);
+    try { this.gen.stop(); } catch {}
+  }
+}
+
+// ================= Sources: local devices, lecturer's devices =================
+let localAudio = null, localCam = null;          // streams opened on this computer
+let remoteAudio = null, remoteCam = null;        // streams received from the lecturer
+let remoteDevices = { audio: [], video: [] };    // lecturer's device list (labels)
+let camTrack = null;                             // camera currently used
+const sel = { audio: store.get("asrc") || "local:", video: store.get("vsrc") || "none" };
+
+async function buildSelects() {
+  let devs = [];
+  try { devs = await navigator.mediaDevices.enumerateDevices(); } catch {}
+  const r = role(), remoteOn = r === "tech";
+  const fill = (el, kind, cur, noneLabel) => {
+    el.innerHTML = "";
+    if (noneLabel) el.add(new Option(noneLabel, "none"));
+    const g1 = document.createElement("optgroup"); g1.label = r === "tech" ? "Teknikerns dator (den här)" : "Den här datorn";
+    const local = devs.filter((d) => d.kind === (kind === "audio" ? "audioinput" : "videoinput"));
+    if (!local.length) g1.append(new Option(kind === "audio" ? "Mikrofon" : "Kamera", "local:"));
+    local.forEach((d, i) => g1.append(new Option(d.label || `${kind === "audio" ? "Mikrofon" : "Kamera"} ${i + 1}`, "local:" + (d.deviceId === "default" ? "" : d.deviceId))));
+    el.append(g1);
+    if (remoteOn) {
+      const g2 = document.createElement("optgroup"); g2.label = "Föreläsarens dator";
+      const list = remoteDevices[kind];
+      g2.append(new Option(kind === "audio" ? "Föreläsarens mikrofon (standard)" : "Föreläsarens kamera (standard)", "remote:"));
+      list.forEach((d) => g2.append(new Option(d.label, "remote:" + d.id)));
+      el.append(g2);
+    }
+    if ([...el.options].some((o) => o.value === cur)) el.value = cur;
+    else if (cur.startsWith("remote:") && remoteOn) el.value = "remote:";
+    else el.selectedIndex = 0;
+  };
+  fill($("asrc"), "audio", sel.audio, null);
+  fill($("vsrc"), "video", sel.video, "Ingen kamera");
+  sel.audio = $("asrc").value; sel.video = $("vsrc").value;
+}
+
+const AUDIO_OPTS = { echoCancellation: false, noiseSuppression: true, autoGainControl: true };
+async function applyAudio() {
+  const [where, id] = [sel.audio.split(":")[0], sel.audio.slice(sel.audio.indexOf(":") + 1)];
+  if (where === "local") {
+    const cur = localAudio?.getAudioTracks()[0];
+    if (!cur || cur.readyState === "ended" || (id && cur.getSettings().deviceId !== id)) {
+      localAudio?.getTracks().forEach((t) => t.stop());
+      try {
+        localAudio = await navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO_OPTS, deviceId: id ? { exact: id } : undefined } });
+      } catch { localAudio = null; }
+    }
+    // Local mic is heard sooner than the remote picture arrives: delay it to match
+    setBusSource(localAudio, role() === "tech" && activeCall ? await videoLatency(activeCall) : 0);
+  } else {
+    localAudio?.getTracks().forEach((t) => t.stop()); localAudio = null;
+    setBusSource(remoteAudio, 0); // travels with the picture: no delay needed
+  }
+  sendWant(); updateSourceInfo();
+}
+async function applyVideo() {
+  const [where, id] = [sel.video.split(":")[0], sel.video.slice(sel.video.indexOf(":") + 1)];
+  if (where !== "local") { localCam?.getTracks().forEach((t) => t.stop()); localCam = null; }
+  if (where === "local") {
+    const cur = localCam?.getVideoTracks()[0];
+    if (!cur || cur.readyState === "ended" || (id && cur.getSettings().deviceId !== id)) {
+      localCam?.getTracks().forEach((t) => t.stop());
+      try {
+        localCam = await navigator.mediaDevices.getUserMedia({ video: { deviceId: id ? { exact: id } : undefined,
+          width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+      } catch { localCam = null; }
+    }
+    camTrack = localCam?.getVideoTracks()[0] || null;
+  } else if (where === "remote") camTrack = remoteCam?.getVideoTracks()[0] || null;
+  else camTrack = null;
+  comp?.setSource("cam", camTrack);
+  show("campv", !!camTrack);
+  $("campv").srcObject = camTrack ? new MediaStream([camTrack]) : null;
+  if (camTrack) $("campv").play().catch(() => {});
+  sendWant(); updateSourceInfo();
+}
+function optionLabel(el) { return el.options[el.selectedIndex]?.text || ""; }
+function updateSourceInfo() {
+  const a = sel.audio.startsWith("remote:"), v = sel.video;
+  const ai = $("ainfo");
+  if (bus.src) { ai.textContent = `Används: ${a ? "föreläsarens dator" : "den här datorn"} – ${optionLabel($("asrc"))}`; ai.classList.remove("missing"); }
+  else { ai.textContent = a ? "Föreläsarens ljud saknas – väntar på föreläsaren" : "Mikrofonen kunde inte öppnas – tillåt mikrofonen i webbläsaren"; ai.classList.add("missing"); }
+  const vi = $("vinfo");
+  if (v === "none") { vi.textContent = "Ingen kamera i inspelningen"; vi.classList.remove("missing"); }
+  else if (camTrack) { vi.textContent = `Används: ${v.startsWith("remote:") ? "föreläsarens dator" : "den här datorn"} – ${optionLabel($("vsrc"))}`; vi.classList.remove("missing"); }
+  else { vi.textContent = v.startsWith("remote:") ? "Föreläsarens kamera saknas – väntar på föreläsaren" : "Kameran kunde inte öppnas"; vi.classList.add("missing"); }
+  if (rec) updateRecInfo();
+}
+$("asrc").addEventListener("change", (e) => { sel.audio = e.target.value; store.set("asrc", sel.audio); applyAudio(); });
+$("vsrc").addEventListener("change", (e) => { sel.video = e.target.value; store.set("vsrc", sel.video); applyVideo(); });
+if (store.get("corner")) $("corner").value = store.get("corner");
+$("corner").addEventListener("change", (e) => store.set("corner", e.target.value));
+navigator.mediaDevices?.addEventListener?.("devicechange", buildSelects);
+if (store.get("quality")) $("quality").value = store.get("quality");
+$("quality").addEventListener("change", (e) => store.set("quality", e.target.value));
+if (store.get("autorec") === "0") $("autorec").checked = false;
+$("autorec").addEventListener("change", (e) => store.set("autorec", e.target.checked ? "1" : "0"));
+
+let sourcesStarted = false;
+async function initSources() {
+  if (sourcesStarted) { await buildSelects(); return; }
+  sourcesStarted = true;
+  ensureBus();
+  await buildSelects();
+  await applyAudio();
+  await buildSelects(); // labels appear after permission
+  await applyVideo();
+  if (camTrack) await buildSelects();
+  updateSourceInfo();
+}
+
+// ================= Test screen (?test) =================
+function testScreen() {
+  const c = document.createElement("canvas"); c.width = 1920; c.height = 1080;
+  const g = c.getContext("2d"); let t = 0;
+  setInterval(() => {
+    t++; g.fillStyle = "#234"; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = "#fc3"; g.beginPath(); g.arc(960 + 600*Math.sin(t/30), 540, 120, 0, 7); g.fill();
+    g.fillStyle = "#fff"; g.font = "80px sans-serif"; g.fillText("Testbild " + t, 80, 140);
+  }, 1000/60);
+  return c.captureStream(60);
+}
+// In test mode, microphone and camera are synthetic: a tone and a coloured clock picture
+if (TEST) {
+  navigator.mediaDevices.getUserMedia = async (c) => {
+    if (c.audio) {
+      const ctx = new AudioContext(), o = ctx.createOscillator(), d = ctx.createMediaStreamDestination();
+      o.frequency.value = (window.name === "lect" ? 660 : 440); o.connect(d); o.start();
+      return d.stream;
+    }
+    const cv = document.createElement("canvas"); cv.width = 640; cv.height = 360;
+    const g = cv.getContext("2d"), col = window.name === "lect" ? "#a33" : "#36a";
+    setInterval(() => { g.fillStyle = col; g.fillRect(0, 0, 640, 360); g.fillStyle = "#fff"; g.font = "48px sans-serif";
+      g.fillText((window.name === "lect" ? "Föreläsarens kamera " : "Teknikerns kamera ") + new Date().toLocaleTimeString(), 20, 200); }, 1000 / 30);
+    return cv.captureStream(30);
+  };
+}
+async function pickScreen(withAudio) {
+  if (TEST) return testScreen();
+  const opts = {
+    video: { frameRate: { ideal: 60 }, width: { ideal: 3840 }, height: { ideal: 2160 }, cursor: "always" },
+    audio: withAudio, systemAudio: withAudio ? "include" : "exclude",
+    selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
+  };
+  if (window.CaptureController) {
+    opts.controller = new CaptureController();
+    try { opts.controller.setFocusBehavior("no-focus-change"); } catch {}
+  }
+  return navigator.mediaDevices.getDisplayMedia(opts);
+}
+
+// ================= Recorder (technician + both) =================
+let rec = null, comp = null, startTime = 0, timer = 0, wakeLock = null, fileName = "", recScreen = null, written = 0;
+
+async function startRecording(screen) {
+  if (rec) return;
+  ensureBus();
+  if (bus.ctx.state === "suspended") await bus.ctx.resume().catch(() => {});
+  recScreen = screen;
+  let video = screen;
+  if (CAN_COMPOSE) {
+    const s = screen.getSettings();
+    const w = s.width && s.height ? s.width : 1920, h = s.width && s.height ? s.height : 1080;
+    comp = new Compositor(w - (w % 2), h - (h % 2));
+    comp.setSource("screen", screen);
+    comp.setSource("cam", camTrack);
+    video = comp.track;
+  }
+  const stream = new MediaStream([video, ...bus.dest.stream.getAudioTracks()]);
+  const mime = pickMime();
+  fileName = `Fermata ${stamp()}.${mime.includes("mp4") ? "mp4" : "webm"}`;
+  memChunks = null;
+  try {
+    writer = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: "text/javascript" })));
+    await workerCall({ cmd: "open", name: fileName + ".pågår" });
+    try { await navigator.storage.persist(); } catch {}
+  } catch (e) {
+    console.warn("OPFS saknas, sparar i minnet", e);
+    writer = null; memChunks = [];
+  }
+  rec = new MediaRecorder(stream, {
+    mimeType: mime || undefined,
+    videoBitsPerSecond: Number($("quality").value),
+    audioBitsPerSecond: 192000,
+  });
+  written = 0;
+  rec.ondataavailable = async (e) => {
+    if (!e.data.size) return;
+    if (writer) {
+      const r = await workerCall(e.data.arrayBuffer()).catch((err) => ({ error: err })); // queued synchronously
+      if (r.size) written = r.size;
+    } else { memChunks.push(e.data); written += e.data.size; }
+    updateRecInfo();
+  };
+  rec.onstop = finishRecording;
+  screen.addEventListener("ended", stopRecording);
+  rec.start(1000);
+  startTime = Date.now();
+  timer = setInterval(() => $("time").textContent = fmtTime(Date.now() - startTime), 250);
+  $("preview").srcObject = new MediaStream([video]); $("preview").play().catch(() => {});
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  window.addEventListener("beforeunload", guard);
+  updateUi(); sendStatus();
+}
+function updateRecInfo() {
+  const s = recScreen?.getSettings() || {};
+  const parts = [`${s.width || "?"}×${s.height || "?"}`, fmtSize(written), fileName];
+  if (!bus.src) parts.push("UTAN LJUD JUST NU");
+  if (camTrack && comp) parts.push("med kamera");
+  $("recinfo").textContent = parts.join(" · ");
+}
+function stopRecording() { if (rec?.state === "recording") rec.stop(); }
+function guard(e) { e.preventDefault(); e.returnValue = ""; }
+
+async function finishRecording() {
+  clearInterval(timer);
+  recScreen?.removeEventListener("ended", stopRecording);
+  if (role() === "both") { recScreen?.stop(); setBusExtra(null); } // own screen share ends with the recording
+  comp?.stop(); comp = null;
+  try { await wakeLock?.release(); } catch {}
+  window.removeEventListener("beforeunload", guard);
+  $("preview").srcObject = null;
+  if (writer) {
+    await workerCall({ cmd: "close", rename: fileName }).catch(() => {});
+    writer.terminate(); writer = null;
+  } else if (memChunks) {
+    download(new Blob(memChunks, { type: rec.mimeType }), fileName); // no disk storage: save right away
+    memChunks = null;
+  }
+  rec = null; recScreen = null;
+  $("time").textContent = "0:00:00";
+  updateUi(); sendStatus();
+  await refreshFiles();
+}
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+
+async function refreshFiles() {
+  const ul = $("files");
+  let root;
+  try { root = await navigator.storage.getDirectory(); } catch { return; }
+  const items = [];
+  for await (const [name, h] of root.entries()) {
+    if (h.kind !== "file" || (rec && name === fileName + ".pågår")) continue;
+    items.push({ name, f: await h.getFile() });
+  }
+  items.sort((a, b) => b.name.localeCompare(a.name));
+  ul.innerHTML = "";
+  if (!items.length) { ul.innerHTML = '<li class="muted">Inga inspelningar ännu.</li>'; return; }
+  for (const { name, f } of items) {
+    const clean = name.replace(/\.pågår$/, ""); // left over after a crash: still playable
+    const li = document.createElement("li");
+    const span = document.createElement("span"); span.className = "name";
+    span.textContent = `${clean} – ${fmtSize(f.size)}` + (clean !== name ? " (avbruten)" : "");
+    const save = document.createElement("button"); save.className = "primary"; save.textContent = "Spara fil";
+    save.onclick = () => saveFile(clean, f);
+    const del = document.createElement("button"); del.className = "ghost"; del.textContent = "Ta bort";
+    del.onclick = async () => {
+      if (!confirm(`Ta bort ”${clean}” från webbläsarens lagring? Har du inte sparat filen går den inte att få tillbaka.`)) return;
+      await root.removeEntry(name); refreshFiles();
+    };
+    li.append(span, save, del); ul.append(li);
+  }
+}
+async function saveFile(name, f) {
+  if (window.showSaveFilePicker) {
+    try {
+      const ext = name.split(".").pop();
+      const h = await showSaveFilePicker({ suggestedName: name,
+        types: [{ description: "Video", accept: { [ext === "mp4" ? "video/mp4" : "video/webm"]: ["." + ext] } }] });
+      await f.stream().pipeTo(await h.createWritable());
+      alert("Sparad.");
+      return;
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  download(f, name);
+}
+
+// ================= Technician: receive from the lecturer =================
+let techPeer = null, activeCall = null, statusConns = new Set(), remoteVideo = null, statsTimer = 0;
+
+function techStatus(text, state) {
+  $("tstatus").textContent = text;
+  $("tdot").className = "dot " + (state || "idle");
+}
+function newCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+
+function techStart() {
+  if (techPeer) return;
+  if (!window.Peer) { techStatus("Kunde inte ladda anslutningsdelen – kontrollera internet och ladda om sidan."); return; }
+  let code = store.get("code");
+  if (!/^\d{6}$/.test(code || "")) { code = newCode(); store.set("code", code); }
+  $("code").textContent = code;
+  techStatus("Ansluter till nätet …");
+  techPeer = new Peer(ID_PREFIX + code, PEER_CONFIG);
+  techPeer.on("open", () => techStatus(activeCall ? "Föreläsarens skärm är ansluten" : "Väntar på föreläsaren – ge hen koden ovan", activeCall ? "ok" : "idle"));
+  techPeer.on("disconnected", () => { techStatus("Tappade nätet – försöker igen …"); setTimeout(() => techPeer && !techPeer.destroyed && techPeer.reconnect(), 2000); });
+  techPeer.on("error", (e) => {
+    if (e.type === "unavailable-id") {
+      // Usually our own previous page that has not timed out yet
+      techStatus("Koden är upptagen just nu – försöker igen …");
+      techPeer.destroy(); techPeer = null; setTimeout(techStart, 5000);
+    } else if (["network", "server-error", "socket-error", "socket-closed"].includes(e.type)) {
+      techStatus("Nätverksfel – försöker igen …");
+    } else console.warn(e);
+  });
+  techPeer.on("connection", (conn) => {
+    statusConns.add(conn);
+    conn.on("open", () => { sendStatus(); sendWant(); });
+    conn.on("data", (d) => {
+      if (d?.devices) { remoteDevices = d.devices; buildSelects().then(updateSourceInfo); }
+      if (d?.mediaError) $("tstats").textContent = `Föreläsarens ${d.mediaError === "audio" ? "mikrofon" : "kamera"} gick inte att öppna (inte tillåten?).`;
+    });
+    conn.on("close", () => statusConns.delete(conn));
+  });
+  techPeer.on("call", (call) => {
+    const type = call.metadata?.type || "screen";
+    if (type === "audio") return onRemoteAudio(call);
+    if (type === "camera") return onRemoteCamera(call);
+    if (activeCall && activeCall.open) { call.close(); return; } // one lecturer at a time
+    activeCall = call;
+    techStatus("Föreläsaren ansluter …", "ok");
+    call.answer(undefined, { sdpTransform: sdpBoost });
+    let got = false;
+    call.on("stream", async (s) => {
+      const v = s.getVideoTracks()[0];
+      if (got || !v) return; got = true;
+      remoteVideo = v;
+      show("remote", true); $("remote").srcObject = new MediaStream([v]); $("remote").play().catch(() => {});
+      techStatus("Föreläsarens skärm är ansluten", "ok");
+      startStats(call);
+      updateUi();
+      if (sel.audio.startsWith("local:")) setTimeout(applyAudio, 3000); // re-measure picture delay
+      if ($("autorec").checked) startRecording(remoteVideo);
+    });
+    const end = () => {
+      if (activeCall !== call) return;
+      activeCall = null; remoteVideo = null; clearInterval(statsTimer);
+      show("remote", false); $("remote").srcObject = null; $("tstats").textContent = "";
+      techStatus("Föreläsaren slutade dela – väntar på föreläsaren", "idle");
+      if (rec && $("autorec").checked) stopRecording();
+      remoteDevices = { audio: [], video: [] }; buildSelects();
+      updateUi();
+    };
+    call.on("close", end);
+    call.on("error", end);
+    call.peerConnection?.addEventListener("connectionstatechange", () => {
+      if (["failed", "closed"].includes(call.peerConnection.connectionState)) end();
+    });
+  });
+}
+let audioCall = null, camCall = null;
+function onRemoteAudio(call) {
+  try { audioCall?.close(); } catch {}
+  audioCall = call;
+  call.answer(undefined, { sdpTransform: sdpAudio });
+  call.on("stream", (s) => {
+    if (audioCall !== call) return;
+    remoteAudio = s;
+    // Chrome only feeds remote audio into Web Audio if it is also attached to a media element
+    $("sink").srcObject = s; $("sink").play().catch(() => {});
+    if (sel.audio.startsWith("remote:")) applyAudio();
+  });
+  const end = () => { if (audioCall !== call) return; audioCall = null; remoteAudio = null; $("sink").srcObject = null; if (sel.audio.startsWith("remote:")) applyAudio(); };
+  call.on("close", end); call.on("error", end);
+}
+function onRemoteCamera(call) {
+  try { camCall?.close(); } catch {}
+  camCall = call;
+  call.answer(undefined, { sdpTransform: sdpBoost });
+  call.on("stream", (s) => { if (camCall !== call) return; remoteCam = s; if (sel.video.startsWith("remote:")) applyVideo(); });
+  const end = () => { if (camCall !== call) return; camCall = null; remoteCam = null; if (sel.video.startsWith("remote:")) applyVideo(); };
+  call.on("close", end); call.on("error", end);
+}
+// Tell the lecturer's page which of its devices we want (null = none)
+function sendWant() {
+  if (role() !== "tech") return;
+  const want = {
+    cmd: "want",
+    audio: sel.audio.startsWith("remote:") ? sel.audio.slice(7) : null,
+    camera: sel.video.startsWith("remote:") ? sel.video.slice(7) : null,
+  };
+  for (const c of statusConns) if (c.open) try { c.send(want); } catch {}
+}
+
+async function videoLatency(call) {
+  // Rough delay of the remote picture: half the round trip + jitter buffer + ~60 ms capture/encode
+  try {
+    const stats = await call.peerConnection.getStats();
+    let rtt = 0.05, jb = 0.05;
+    stats.forEach((r) => {
+      if (r.type === "candidate-pair" && r.nominated && r.currentRoundTripTime) rtt = r.currentRoundTripTime;
+      if (r.type === "inbound-rtp" && r.kind === "video" && r.jitterBufferEmittedCount) jb = r.jitterBufferDelay / r.jitterBufferEmittedCount;
+    });
+    return rtt / 2 + jb + 0.06;
+  } catch { return 0.15; }
+}
+
+function startStats(call) {
+  let lastBytes = 0, lastT = 0;
+  clearInterval(statsTimer);
+  statsTimer = setInterval(async () => {
+    try {
+      const stats = await call.peerConnection.getStats();
+      let txt = "", relay = false, pairId = null;
+      stats.forEach((r) => {
+        if (r.type === "inbound-rtp" && r.kind === "video") {
+          const mbit = lastT ? ((r.bytesReceived - lastBytes) * 8 / ((r.timestamp - lastT) / 1000) / 1e6) : 0;
+          lastBytes = r.bytesReceived; lastT = r.timestamp;
+          txt = `Skärm: ${r.frameWidth || "?"}×${r.frameHeight || "?"} · ${Math.round(r.framesPerSecond || 0)} bilder/s · ${mbit.toFixed(1).replace(".", ",")} Mbit/s`;
+        }
+        if (r.type === "transport") pairId = r.selectedCandidatePairId;
+      });
+      if (pairId) {
+        const pair = stats.get(pairId), local = pair && stats.get(pair.localCandidateId);
+        relay = local?.candidateType === "relay";
+      }
+      $("tstats").textContent = txt + (relay ? " · via omväg (servern) – kvaliteten kan bli sämre" : "");
+    } catch {}
+  }, 2000);
+}
+
+function sendStatus() {
+  const msg = { rec: !!rec, since: rec ? startTime : 0 };
+  for (const c of statusConns) if (c.open) try { c.send(msg); } catch {}
+}
+$("newcode").onclick = () => {
+  if (activeCall && !confirm("Föreläsaren är ansluten och kopplas bort. Byta kod ändå?")) return;
+  store.set("code", newCode());
+  activeCall?.close();
+  techPeer?.destroy(); techPeer = null; techStart();
+};
+
+// ================= Lecturer: send screen (+ mic/camera when the technician asks) =================
+let lectPeer = null, lectStream = null, lectCall = null, lectConn = null, lectTimer = 0, lectTarget = "";
+let techRec = { rec: false }, lectAllowed = { audio: false, camera: false };
+const lectMedia = { audio: null, camera: null }; // { call, stream, id }
+let wantChain = Promise.resolve();
+
+function lectError(t) { $("lerr").textContent = t; show("lerr", !!t); }
+function stopLectMedia(kind) {
+  const m = lectMedia[kind]; if (!m) return;
+  try { m.call.close(); } catch {}
+  m.stream.getTracks().forEach((t) => t.stop());
+  lectMedia[kind] = null;
+}
+function lectMediaText() {
+  const parts = [];
+  if (lectMedia.audio) parts.push("din mikrofon");
+  if (lectMedia.camera) parts.push("din kamera");
+  $("lmedia").textContent = parts.length ? `Teknikern använder ${parts.join(" och ")}.` : "";
+}
+function applyWant(w) {
+  wantChain = wantChain.then(async () => {
+    for (const kind of ["audio", "camera"]) {
+      const want = w[kind];
+      if (want === null || want === undefined || !lectAllowed[kind] || !lectPeer) { stopLectMedia(kind); continue; }
+      if (lectMedia[kind] && lectMedia[kind].id === want && !lectMedia[kind].closed) continue; // already sending this
+      stopLectMedia(kind);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(kind === "audio"
+          ? { audio: { ...AUDIO_OPTS, deviceId: want ? { exact: want } : undefined } }
+          : { video: { deviceId: want ? { exact: want } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+        const call = lectPeer.call(lectTarget, stream, { metadata: { type: kind }, sdpTransform: kind === "audio" ? sdpAudio : sdpBoost });
+        const m = { call, stream, id: want, closed: false };
+        lectMedia[kind] = m;
+        const gone = () => { m.closed = true; if (lectMedia[kind] === m) { stream.getTracks().forEach((t) => t.stop()); lectMedia[kind] = null; lectMediaText(); } };
+        call.on("close", gone); call.on("error", gone);
+      } catch (e) {
+        console.warn(e);
+        try { lectConn?.send({ mediaError: kind }); } catch {}
+      }
+    }
+    lectMediaText();
+  });
+}
+async function lectSendDevices() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const pick = (k) => devs.filter((d) => d.kind === k && d.deviceId && d.deviceId !== "default")
+      .map((d, i) => ({ id: d.deviceId, label: d.label || `Enhet ${i + 1}` }));
+    lectConn?.send({ devices: { audio: lectAllowed.audio ? pick("audioinput") : [], video: lectAllowed.camera ? pick("videoinput") : [] } });
+  } catch {}
+}
+function lectStop(msg) {
+  clearInterval(lectTimer);
+  stopLectMedia("audio"); stopLectMedia("camera"); lectMediaText();
+  lectStream?.getTracks().forEach((t) => t.stop()); lectStream = null;
+  try { lectCall?.close(); } catch {} lectCall = null;
+  try { lectPeer?.destroy(); } catch {} lectPeer = null; lectConn = null;
+  show("lectsetup", true); show("lectlive", false);
+  window.removeEventListener("beforeunload", guard);
+  updateUi();
+  if (msg) lectError(msg);
+}
+$("lcode").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError(""); });
+$("share").onclick = async () => {
+  const code = $("lcode").value;
+  if (!/^\d{6}$/.test(code)) { lectError("Skriv den sexsiffriga koden från teknikern."); return; }
+  if (!window.Peer) { lectError("Kunde inte ladda anslutningsdelen – kontrollera internet och ladda om sidan."); return; }
+  lectError("");
+  try { lectStream = await pickScreen(false); } catch { return; } // picker cancelled
+  const track = lectStream.getVideoTracks()[0];
+  try { track.contentHint = "detail"; } catch {} // keep full resolution (text must stay sharp)
+  track.addEventListener("ended", () => lectStop());
+  show("lectsetup", false); show("lectlive", true); updateUi();
+  $("lstatus").textContent = "Ansluter till teknikern …";
+  window.addEventListener("beforeunload", guard);
+
+  // Ask for microphone/camera permission now, so the technician can switch later without a prompt
+  lectAllowed = { audio: $("lallowmic").checked, camera: $("lallowcam").checked };
+  for (const kind of ["audio", "camera"]) {
+    if (!lectAllowed[kind]) continue;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia(kind === "audio" ? { audio: true } : { video: true });
+      s.getTracks().forEach((t) => t.stop());
+    } catch { lectAllowed[kind] = false; }
+  }
+
+  lectTarget = ID_PREFIX + code;
+  lectPeer = new Peer(PEER_CONFIG);
+  lectPeer.on("error", (e) => {
+    if (e.type === "peer-unavailable") lectStop("Hittar ingen tekniker med den koden. Kontrollera koden och att teknikerns sida är öppen.");
+    else if (lectStream) $("lstatus").textContent = "Nätverksproblem – försöker …";
+  });
+  lectPeer.on("open", () => {
+    lectConn = lectPeer.connect(lectTarget);
+    lectConn.on("open", lectSendDevices);
+    lectConn.on("data", (d) => {
+      if (d?.cmd === "want") applyWant(d);
+      else if (d && "rec" in d) techRec = d;
+    });
+    lectCall = lectPeer.call(lectTarget, lectStream, { sdpTransform: sdpBoost });
+    const pc = lectCall.peerConnection;
+    // Prefer H.264 (hardware encoding on most laptops), then VP9/VP8
+    try {
+      const caps = RTCRtpSender.getCapabilities("video").codecs;
+      const rank = (c) => ({ "video/H264": 0, "video/VP9": 1, "video/VP8": 2 }[c.mimeType] ?? 3);
+      for (const t of pc.getTransceivers()) if (t.sender.track?.kind === "video")
+        t.setCodecPreferences([...caps].sort((a, b) => rank(a) - rank(b)));
+    } catch (e) { console.warn(e); }
+    pc.addEventListener("connectionstatechange", async () => {
+      if (pc.connectionState === "connected") {
+        // Let the picture use the bandwidth a local network has
+        for (const s of pc.getSenders()) if (s.track?.kind === "video") {
+          const p = s.getParameters(); p.encodings = p.encodings?.length ? p.encodings : [{}];
+          p.encodings[0].maxBitrate = SEND_MAX_BITRATE; p.encodings[0].maxFramerate = 60;
+          p.degradationPreference = "maintain-resolution";
+          try { await s.setParameters(p); } catch (e) { console.warn(e); }
+        }
+      }
+      if (pc.connectionState === "failed") lectStop("Anslutningen till teknikern bröts. Klicka Dela skärmen igen.");
+    });
+    lectCall.on("close", () => lectStream && lectStop("Teknikern kopplade bort anslutningen."));
+    lectTimer = setInterval(() => {
+      if (pc.connectionState !== "connected") return;
+      $("ldot").className = "dot " + (techRec.rec ? "" : "ok");
+      $("lstatus").textContent = techRec.rec
+        ? `Skärmen skickas · teknikern spelar in ${fmtTime(Date.now() - techRec.since)}`
+        : "Skärmen skickas · teknikern spelar inte in just nu";
+    }, 500);
+  });
+};
+$("unshare").onclick = () => { if (confirm("Sluta dela skärmen? Teknikerns inspelning stoppas.")) lectStop(); };
+
+// ================= Start / stop =================
+$("start").onclick = async () => {
+  if (role() === "tech") { if (remoteVideo) startRecording(remoteVideo); return; }
+  let s;
+  try { s = await pickScreen($("sysaudio").checked); } catch { return; }
+  setBusExtra(s.getAudioTracks().length ? s : null);
+  await startRecording(s.getVideoTracks()[0]);
+};
+$("stop").onclick = stopRecording;
+
+// ================= Roles =================
+function updateUi() {
+  const r = role();
+  show("lect", r === "lecturer");
+  show("techcode", r === "tech");
+  show("setup", r !== "lecturer");
+  show("sysbox", r === "both");
+  show("autobox", r === "tech");
+  show("bothhelp", r === "both");
+  show("nocomp", !CAN_COMPOSE);
+  $("vsrc").disabled = !CAN_COMPOSE;
+  show("startcard", r !== "lecturer" && !rec);
+  $("start").textContent = r === "tech" ? "Starta inspelningen" : "Välj skärm och starta inspelningen";
+  $("start").disabled = r === "tech" && !remoteVideo;
+  show("reccard", !!rec);
+  show("filescard", r !== "lecturer");
+  document.querySelectorAll('input[name="role"]').forEach((i) => i.disabled = !!rec || !!lectStream);
+}
+function applyRole() {
+  const r = role();
+  store.set("role", r);
+  if (r !== "lecturer") { initSources(); refreshFiles(); }
+  if (r === "tech") techStart();
+  updateUi();
+}
+const savedRole = store.get("role");
+if (savedRole) { const i = document.querySelector(`input[name="role"][value="${savedRole}"]`); if (i) i.checked = true; }
+document.querySelectorAll('input[name="role"]').forEach((i) => i.addEventListener("change", applyRole));
+if (!TEST && (!navigator.mediaDevices?.getDisplayMedia || !window.MediaRecorder)) {
+  show("unsupported", true); $("share").disabled = true;
+}
+applyRole();
+</script>
+</body>
+</html>
