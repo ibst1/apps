@@ -37,7 +37,7 @@ static class Program
         if (!first) { ShowRunning(); OpenPage(); return; }   // already running: bring its window forward, show the page
 
         ApplicationConfiguration.Initialize();
-        _server = new PageServer();
+        _server = new PageServer { AllowLocal = args.Contains("--dev") };   // local test copies of the page only with --dev
         try { _server.Start(); }
         catch (Exception e)
         {
@@ -108,25 +108,28 @@ static class Program
         if (_capture != null && last != null && DateTime.UtcNow - _lastAt > TimeSpan.FromSeconds(1))
         { _lastAt = DateTime.UtcNow; _server.SendFrame(last, Wants); }
 
-        // The mode of the page that uses the slideshow (another open Fermata tab may be "Tekniker")
-        string role = (clients.LastOrDefault(Wants) ?? clients.LastOrDefault())?.Role ?? "";
+        // With several Fermata pages open, the one whose mode was changed last is the one in use
+        var main = clients.OrderByDescending(c => c.RoleAt).FirstOrDefault();
+        string role = main?.Role ?? "";
         string mode = role switch { "lecturer" => "Föreläsare", "both" => "Båda", "tech" => "Tekniker", _ => "" };
         string state, detail; bool ok = true;
-        if (clients.Count == 0) { state = "Väntar på Fermata-sidan"; detail = "Klicka Öppna Fermata-sidan och välj Föreläsare eller Båda."; ok = false; }
-        else if (!active) { state = $"Sidan är ansluten – läge: {(mode == "" ? "inget valt" : mode)}"; detail = "Välj Föreläsare eller Båda på sidan."; ok = false; }
-        else if (_capture != null) { state = "Bildspelet tas utan muspekare" + (_capture.Fps > 0 ? $" ({_capture.Fps} bilder/s)" : " (bilden står still)"); detail = $"Läge på sidan: {mode}. " + (mode == "Föreläsare" ? "Det skickas till teknikern när koden är ifylld." : "Sidan spelar in."); }
-        else { state = $"Redo – läge: {mode}"; detail = "Starta bildspelet i PowerPoint (F5), gärna med talarvy. Det tas automatiskt, utan muspekare."; }
+        if (clients.Count == 0) { state = "Väntar på Fermata-sidan"; detail = "Öppna sidan och välj Föreläsare eller Båda."; ok = false; }
+        else if (!active) { state = $"Läge: {(mode == "" ? "inget valt" : mode)}"; detail = "Välj Föreläsare eller Båda på Fermata-sidan."; ok = false; }
+        else if (_capture != null) { state = "Bildspelet tas" + (_capture.Fps > 0 ? $" ({_capture.Fps} bilder/s)" : " (stillbild)"); detail = $"Läge: {mode}, utan muspekare. " + (mode == "Föreläsare" ? "Skickas när koden är ifylld." : ""); }
+        else { state = $"Redo – läge: {mode}"; detail = "Tryck F5 i PowerPoint. Bildspelet tas automatiskt, utan muspekare."; }
 
         // Recording indicator: the page reports whether a recording runs (Båda: this computer,
         // Föreläsare: the technician's). Red badge on the speaker's screen, red tray icon and window text.
-        var recClient = clients.Where(c => Wants(c) && c.Rec && DateTime.UtcNow - c.RecAt < TimeSpan.FromSeconds(4)).LastOrDefault();
+        var recClient = clients.Where(c => Wants(c) && c.Rec && DateTime.UtcNow - c.RecAt < TimeSpan.FromSeconds(4))
+                               .OrderByDescending(c => c.RoleAt).FirstOrDefault();
         bool recording = recClient != null && _capture != null;
         if (recording)
         {
             var el = TimeSpan.FromMilliseconds(recClient.RecMs) + (DateTime.UtcNow - recClient.RecAt);
             _badge.ShowRecording(el, _hwnd);
-            state = $"●  Spelar in  {(int)el.TotalHours}:{el.Minutes:00}:{el.Seconds:00}";
-            detail = (mode == "Föreläsare" ? "Teknikern spelar in bildspelet" : "Bildspelet spelas in") + ", utan muspekare."
+            state = $"● Spelar in {(int)el.TotalHours}:{el.Minutes:00}:{el.Seconds:00}";
+            // say who records from the page that actually records, not from another open page
+            detail = (recClient.Role == "lecturer" ? "Teknikern spelar in" : "Den här datorn spelar in") + ", utan muspekare."
                      + (_capture.Fps > 0 ? $" {_capture.Fps} bilder/s." : "");
         }
         else _badge.HideBadge();

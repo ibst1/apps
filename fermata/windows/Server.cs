@@ -27,6 +27,7 @@ sealed class PageServer
     {
         public WebSocket Ws;
         public string Role = "";
+        public DateTime RoleAt;             // when this page last changed its mode (the newest one counts)
         public bool Rec;                    // the page says a recording is running
         public long RecMs;                  // how long it has run, as of RecAt
         public DateTime RecAt;
@@ -56,12 +57,14 @@ sealed class PageServer
         }
     }
 
-    static bool OriginOk(string origin)
+    /// <summary>Allow a local copy of the page (http://localhost) too – only when started with --dev.</summary>
+    public bool AllowLocal;
+
+    bool OriginOk(string origin)
     {
         if (string.IsNullOrEmpty(origin)) return false;
         if (AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)) return true;
-        // local development copy of the page
-        return Uri.TryCreate(origin, UriKind.Absolute, out var u) && (u.Host == "localhost" || u.Host == "127.0.0.1");
+        return AllowLocal && Uri.TryCreate(origin, UriKind.Absolute, out var u) && (u.Host == "localhost" || u.Host == "127.0.0.1");
     }
 
     async Task Handle(TcpClient tcp)
@@ -117,7 +120,11 @@ sealed class PageServer
                 {
                     using var doc = JsonDocument.Parse(ms.ToArray());
                     var root = doc.RootElement;
-                    if (root.TryGetProperty("role", out var role)) { c.Role = role.GetString() ?? ""; Log.Write($"Mode on page: {c.Role}"); Changed?.Invoke(); }
+                    if (root.TryGetProperty("role", out var role))
+                    {
+                        var r = role.GetString() ?? "";
+                        if (r != c.Role || c.RoleAt == default) { c.Role = r; c.RoleAt = DateTime.UtcNow; Log.Write($"Mode on page: {c.Role}"); Changed?.Invoke(); }
+                    }
                     if (root.TryGetProperty("rec", out var recEl))
                     {
                         bool on = recEl.ValueKind == JsonValueKind.True;
