@@ -87,11 +87,23 @@ const APPS = [
     text: "Markdown with CriticMarkup and Zotero citations to Word with real tracked changes and comments.", tags: ["Pandoc", "Obsidian"] },
   { section: "Writing and research", name: "Attacca", repo: "attacca", listed: true, asset: /\.zip$/,
     text: "Open files from Explorer in the right Obsidian vault.", tags: ["Obsidian"] },
+
+  // Web apps: "web" is the page on this site; nothing to download.
+  { section: "Recording talks", name: "Fermata", web: "fermata/", listed: true,
+    text: "Record a PowerPoint talk in the browser: slides at full resolution and frame rate, microphone and camera, sent live from the speaker's laptop to a technician's computer. Nothing to install.",
+    tags: ["Web app", "Chrome / Edge", "Swedish"] },
 ];
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function card(app) {
+  if (app.web) return `<article class="card" id="${esc(app.web.replace(/\W/g, ""))}">
+    <h3>${esc(app.name)}</h3>
+    <p>${esc(app.text)}</p>
+    <div>${app.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+    <div class="actions"><a class="btn" href="${esc(app.web)}">Open</a></div>
+    <div class="meta">Runs in the browser</div>
+  </article>`;
   const page = `https://github.com/ibst1/${app.repo}`;
   return `<article class="card" id="${app.repo}">
     <h3>${esc(app.name)}</h3>
@@ -113,7 +125,7 @@ document.getElementById("sections").innerHTML = sections.map(s =>
 
 // Point each button straight at the file in the newest release. An app without a release, or
 // a GitHub that can't be reached, keeps the button pointing at the repo's README.
-for (const app of SHOWN) {
+for (const app of SHOWN.filter(a => a.repo)) {
   fetch(`https://api.github.com/repos/ibst1/${app.repo}/releases/latest`)
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(rel => {
