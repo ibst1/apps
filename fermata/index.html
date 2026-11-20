@@ -1247,7 +1247,7 @@ $("stop").onclick = stopRecording;
 // without the mouse pointer, also behind the presenter view – as JPEG frames. They become a
 // video track that replaces the browser's share dialog.
 const HELPER_URL = "ws://127.0.0.1:47811";
-var helperWs = null, helperOk = false, helperGen = null, helperWriter = null, helperBusy = 0, helperRetry = 0, helperFps = 0, helperCount = 0, helperSize = null; // var: read by UI code above
+var helperInactive = false, helperWs = null, helperOk = false, helperGen = null, helperWriter = null, helperBusy = 0, helperRetry = 0, helperFps = 0, helperCount = 0, helperSize = null; // var: read by UI code above
 function helperConnect() {
   if (helperWs || !window.MediaStreamTrackGenerator) return;
   let ws;
@@ -1262,10 +1262,20 @@ function helperConnect() {
   };
   ws.onmessage = (e) => {
     if (typeof e.data !== "string") return helperFrame(e.data);
-    try { const m = JSON.parse(e.data); if (m.type === "show-start") helperStart(); else if (m.type === "show-end") helperEnd(); } catch {}
+    try {
+      const m = JSON.parse(e.data);
+      if (m.type === "show-start") helperStart();
+      else if (m.type === "show-end") helperEnd();
+      // Only one Fermata tab gets the slideshow: the one where the mode was chosen last
+      else if (m.type === "inactive") { helperInactive = true; helperEnd(); helperUi(); }
+      else if (m.type === "active") { helperInactive = false; helperUi(); }
+    } catch {}
   };
 }
-function helperSendRole() { if (helperOk) try { helperWs.send(JSON.stringify({ type: "role", role: role() })); } catch {} }
+// When the mode was last chosen in THIS tab (by a click; else when the tab was opened). The program
+// serves the tab with the newest choice, so reconnecting tabs don't take over the slideshow.
+var roleChosenAt = Date.now();
+function helperSendRole(claim) { if (helperOk) try { helperWs.send(JSON.stringify({ type: "role", role: role(), chosenAt: roleChosenAt, claim: !!claim })); } catch {} }
 function helperStart() {
   if (!helperGen || helperGen.readyState !== "live") {
     helperGen = new MediaStreamTrackGenerator({ kind: "video" });
@@ -1311,12 +1321,14 @@ setInterval(() => {
   const r = role();
   const on = r === "both" ? !!rec : r === "lecturer" ? !!(lectStream && techRec.rec) : false;
   const elapsed = !on ? 0 : r === "both" ? Date.now() - startTime : Date.now() - techRec.since;
-  try { helperWs.send(JSON.stringify({ type: "status", rec: on, elapsed: Math.max(0, Math.round(elapsed)) })); } catch {}
+  // fps: frames this page decoded per second (for the program's log: shows where frames are lost)
+  try { helperWs.send(JSON.stringify({ type: "status", rec: on, elapsed: Math.max(0, Math.round(elapsed)), fps: helperFps, hidden: document.hidden })); } catch {}
 }, 1000);
 function helperUi() {
   const r = role(), live = helperGen && helperGen.readyState === "live";
   const waitingForCode = r === "lecturer" && !lectStream;
   const txt = !helperOk ? ""
+    : helperInactive ? "Fermata för Windows används just nu av en annan Fermata-flik. Välj läge här igen för att använda den här fliken i stället."
     : live && waitingForCode ? "✓ Fermata för Windows har bildspelet, utan muspekare. Skriv koden från teknikern så skickas det."
     : live ? `✓ Fermata för Windows tar bildspelet utan muspekare (${helperFps.toFixed(0)} bilder/s).`
     : "✓ Fermata för Windows är igång. Starta bildspelet i PowerPoint (F5) – det tas automatiskt, utan muspekare. Du behöver inte trycka Dela.";
@@ -1366,6 +1378,10 @@ if (savedRole) { const i = document.querySelector(`input[name="role"][value="${s
 document.querySelectorAll('input[name="role"]').forEach((i) => i.addEventListener("change", () => {
   applyRole();
   if (bothUsesPip()) openSharePip("both"); // the click on "Båda" allows opening the floating window at once
+}));
+// A click on a mode – also the one already chosen – makes this tab the one Fermata for Windows serves
+document.querySelectorAll('input[name="role"]').forEach((i) => i.addEventListener("click", () => {
+  roleChosenAt = Date.now(); helperSendRole(true);
 }));
 if (!TEST && (!navigator.mediaDevices?.getDisplayMedia || !window.MediaRecorder)) {
   show("unsupported", true); $("share").disabled = true;

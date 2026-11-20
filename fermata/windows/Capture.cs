@@ -63,10 +63,22 @@ sealed class WindowCapture : IDisposable
         Log.Write($"Capture started {_size.Width}x{_size.Height}");
     }
 
+    // Diagnostics: frames Windows delivered / skipped because encoders were busy, per log period
+    int _arrived, _skippedBusy;
+    DateTime _statsStart = DateTime.UtcNow;
+    public string TakeStats()
+    {
+        var s = (DateTime.UtcNow - _statsStart).TotalSeconds;
+        var r = $"arrived {_arrived / s:0.0}/s, skipped(busy) {_skippedBusy / s:0.0}/s, sent {_fps}/s";
+        _arrived = 0; _skippedBusy = 0; _statsStart = DateTime.UtcNow;
+        return r;
+    }
+
     void OnFrame(Direct3D11CaptureFramePool sender, object args)
     {
         using var frame = sender.TryGetNextFrame();
         if (frame == null) return;
+        Interlocked.Increment(ref _arrived);
         var size = frame.ContentSize;
         if (size.Width != _size.Width || size.Height != _size.Height)
         {
@@ -77,7 +89,7 @@ sealed class WindowCapture : IDisposable
         // Max 60 frames per second, and skip while all encoders are busy (newest frame wins)
         long now = DateTime.UtcNow.Ticks;
         if (now - _lastFrameTicks < TimeSpan.TicksPerSecond / 61) return;
-        if (Volatile.Read(ref _busy) >= Workers) return;
+        if (Volatile.Read(ref _busy) >= Workers) { Interlocked.Increment(ref _skippedBusy); return; }
         _lastFrameTicks = now;
 
         byte[] bgra; int w, h, stride;

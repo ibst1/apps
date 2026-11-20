@@ -28,6 +28,9 @@ sealed class PageServer
         public WebSocket Ws;
         public string Role = "";
         public DateTime RoleAt;             // when this page last changed its mode (the newest one counts)
+        public bool ToldMain;               // last "active"/"inactive" sent to this page
+        public double PageFps;              // frames the page decoded per second (diagnostics)
+        public bool PageHidden;             // the page's tab is in the background
         public bool Rec;                    // the page says a recording is running
         public long RecMs;                  // how long it has run, as of RecAt
         public DateTime RecAt;
@@ -123,7 +126,12 @@ sealed class PageServer
                     if (root.TryGetProperty("role", out var role))
                     {
                         var r = role.GetString() ?? "";
-                        if (r != c.Role || c.RoleAt == default) { c.Role = r; c.RoleAt = DateTime.UtcNow; Log.Write($"Mode on page: {c.Role}"); Changed?.Invoke(); }
+                        // The page says when its mode was last chosen (a click in that tab); the newest choice wins.
+                        // Using that instead of the connect time keeps reconnecting old tabs from taking over.
+                        // (an older version of the page sends no time: it ranks below any current page)
+                        var chosen = root.TryGetProperty("chosenAt", out var ca) && ca.TryGetInt64(out var ms2)
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(ms2).UtcDateTime : DateTime.MinValue.AddTicks(1);
+                        if (r != c.Role || chosen != c.RoleAt) { c.Role = r; c.RoleAt = chosen; Log.Write($"Mode on page: {c.Role} (chosen {chosen.ToLocalTime():HH:mm:ss})"); Changed?.Invoke(); }
                     }
                     if (root.TryGetProperty("rec", out var recEl))
                     {
@@ -131,6 +139,8 @@ sealed class PageServer
                         if (on != c.Rec) Log.Write(on ? "Recording started (page)" : "Recording stopped (page)");
                         c.Rec = on; c.RecAt = DateTime.UtcNow;
                         c.RecMs = root.TryGetProperty("elapsed", out var el) && el.TryGetInt64(out var elapsedMs) ? elapsedMs : 0;
+                        if (root.TryGetProperty("fps", out var pf) && pf.TryGetDouble(out var pfps)) c.PageFps = pfps;
+                        c.PageHidden = root.TryGetProperty("hidden", out var hd) && hd.ValueKind == JsonValueKind.True;
                     }
                 }
                 catch { }

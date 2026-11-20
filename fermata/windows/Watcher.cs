@@ -6,19 +6,26 @@ namespace Fermata;
 /// <summary>Finds PowerPoint's slideshow window ("PowerPoint-bildspel", class screenClass).</summary>
 static class SlideshowWindow
 {
-    /// <summary>The visible, not minimised slideshow window, or IntPtr.Zero. Keeps <paramref name="current"/> if it still qualifies.</summary>
+    static readonly Dictionary<IntPtr, DateTime> FirstSeen = new();
+
+    /// <summary>
+    /// The visible, not minimised slideshow window, or IntPtr.Zero. With several slideshows running,
+    /// the most recently started one wins (that is the one just started with F5).
+    /// </summary>
     public static IntPtr Find(IntPtr current, out string title)
     {
         title = null;
-        if (current != IntPtr.Zero && Qualifies(current)) { title = Title(current); return current; }
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((h, _) =>
-        {
-            if (Qualifies(h)) { found = h; return false; }
-            return true;
-        }, IntPtr.Zero);
-        if (found != IntPtr.Zero) title = Title(found);
-        return found;
+        var now = DateTime.UtcNow;
+        var all = new List<IntPtr>();
+        EnumWindows((h, _) => { if (Qualifies(h)) all.Add(h); return true; }, IntPtr.Zero);
+        foreach (var h in all) if (!FirstSeen.ContainsKey(h)) FirstSeen[h] = now;
+        foreach (var h in FirstSeen.Keys.Where(k => !all.Contains(k)).ToList()) FirstSeen.Remove(h);
+        if (all.Count == 0) return IntPtr.Zero;
+        var newest = all.OrderByDescending(h => FirstSeen[h]).First();
+        // keep the current one unless a newer slideshow has appeared
+        var pick = current != IntPtr.Zero && all.Contains(current) && FirstSeen[current] >= FirstSeen[newest] ? current : newest;
+        title = Title(pick);
+        return pick;
     }
 
     static bool Qualifies(IntPtr h)

@@ -28,7 +28,7 @@ static class Program
     static Icon _iconIdle, _iconRec;
     static byte[] _last;            // newest JPEG of the slideshow
     static string Dump;
-    static DateTime _lastAt;
+    static DateTime _lastAt, _statsAt;
 
     [STAThread]
     static void Main(string[] args)
@@ -62,7 +62,7 @@ static class Program
         _tray.DoubleClick += (_, _) => { _window.WindowState = FormWindowState.Normal; _window.Activate(); };
 
         var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
-        _server.Changed += () => ui.Post(_ => { Tick(); if (_capture != null) AnnounceStart(); }, null);
+        _server.Changed += () => ui.Post(_ => Tick(), null);
         var timer = new System.Windows.Forms.Timer { Interval = 300 };
         timer.Tick += (_, _) => Tick();
         timer.Start();
@@ -75,12 +75,28 @@ static class Program
         StopCapture();
     }
 
-    static bool Wants(PageServer.Client c) => c.Role is "lecturer" or "both";
+    static PageServer.Client _main;
+    static bool Wants(PageServer.Client c) => ReferenceEquals(c, _main) && (c.Role == "lecturer" || c.Role == "both");
 
     /// <summary>Every 300 ms: start or stop capturing as the slideshow and the page's mode change.</summary>
     static void Tick()
     {
         var clients = _server.Clients;
+        // Only ONE page gets the slideshow: the one whose mode was changed last. Other open Fermata
+        // tabs are told so (otherwise every tab in "Båda" records at once and all of them stutter).
+        var newMain = clients.OrderByDescending(c => c.RoleAt).FirstOrDefault();
+        if (!ReferenceEquals(newMain, _main))
+        {
+            var old = _main; _main = newMain;
+            if (old != null && _capture != null) _ = _server.SendJson(old, new { type = "show-end" });
+            if (_main != null) Log.Write($"Page in use: mode {_main.Role}");
+            if (_capture != null) AnnounceStart();
+        }
+        foreach (var c in clients)
+        {
+            bool isMain = ReferenceEquals(c, _main);
+            if (c.ToldMain != isMain) { c.ToldMain = isMain; _ = _server.SendJson(c, new { type = isMain ? "active" : "inactive" }); }
+        }
         bool active = clients.Any(Wants);
         var h = SlideshowWindow.Find(_hwnd, out var title);
 
@@ -102,15 +118,20 @@ static class Program
             catch (Exception e) { Log.Write("capture start failed: " + e); _capture = null; _hwnd = IntPtr.Zero; }
         }
 
+        if (_capture != null && DateTime.UtcNow - _statsAt > TimeSpan.FromSeconds(5))
+        {
+            _statsAt = DateTime.UtcNow;
+            var pageInfo = _main == null ? "no page" : $"page ({_main.Role}{(_main.PageHidden ? ", background tab" : "")}) decodes {_main.PageFps:0}/s, rec {_main.Rec}";
+            Log.Write($"capture: {_capture.TakeStats()} | {pageInfo} | pages {clients.Count}");
+        }
+
         // Windows only delivers a frame when the slide changes. Repeat the last one every second, so a
         // page that connects during a still slide gets a picture and the recording never stalls.
         var last = _last;
         if (_capture != null && last != null && DateTime.UtcNow - _lastAt > TimeSpan.FromSeconds(1))
         { _lastAt = DateTime.UtcNow; _server.SendFrame(last, Wants); }
 
-        // With several Fermata pages open, the one whose mode was changed last is the one in use
-        var main = clients.OrderByDescending(c => c.RoleAt).FirstOrDefault();
-        string role = main?.Role ?? "";
+        string role = _main?.Role ?? "";
         string mode = role switch { "lecturer" => "Föreläsare", "both" => "Båda", "tech" => "Tekniker", _ => "" };
         string state, detail; bool ok = true;
         if (clients.Count == 0) { state = "Väntar på Fermata-sidan"; detail = "Öppna sidan och välj Föreläsare eller Båda."; ok = false; }
@@ -154,7 +175,8 @@ static class Program
 
     static void AnnounceStart()
     {
-        _server.Broadcast(new { type = "show-start", title = "PowerPoint-bildspel" });
+        // only the page in use gets the slideshow
+        if (_main != null && Wants(_main)) _ = _server.SendJson(_main, new { type = "show-start", title = "PowerPoint-bildspel" });
         if (_last != null) _lastAt = DateTime.MinValue;    // resend the last frame on the next tick
     }
 
