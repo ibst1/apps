@@ -100,7 +100,7 @@
       <ol class="muted" style="margin-top:12px" id="steps-pip">
         <li>Skriv koden ovan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Fönstret stänger sig och du är tillbaka i PowerPoint.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Klicka sedan en gång i PowerPoint (till exempel i anteckningarna) så fungerar klickaren igen. Låt det lilla fönstret vara öppet – det visar att delningen pågår.</li>
       </ol>
       <ol class="muted hidden" style="margin-top:12px" id="steps-plain">
         <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
@@ -179,7 +179,7 @@
       <ol class="muted hidden" id="both-pip">
         <li>Klicka nedan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst.</li>
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Inspelningen startar och du är tillbaka i PowerPoint.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Inspelningen startar. Klicka en gång i PowerPoint (till exempel i anteckningarna) så fungerar klickaren igen. Låt det lilla fönstret vara öppet – det visar att inspelningen pågår.</li>
       </ol>
       <ol class="muted hidden" id="both-plain">
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
@@ -528,10 +528,10 @@ async function initSources() {
 }
 
 // ================= Test screen (?test) =================
-function testScreen() {
-  const c = document.createElement("canvas"); c.width = 1920; c.height = 1080;
+function testScreen(win = window) { // made in the given window, like a real share from that window
+  const c = win.document.createElement("canvas"); c.width = 1920; c.height = 1080;
   const g = c.getContext("2d"); let t = 0;
-  setInterval(() => {
+  win.setInterval(() => {
     t++; g.fillStyle = "#234"; g.fillRect(0, 0, c.width, c.height);
     g.fillStyle = "#fc3"; g.beginPath(); g.arc(960 + 600*Math.sin(t/30), 540, 120, 0, 7); g.fill();
     g.fillStyle = "#fff"; g.font = "80px sans-serif"; g.fillText("Testbild " + t, 80, 140);
@@ -558,7 +558,7 @@ if (TEST) {
 // the presenter view, so the browser keeps focus and the page says "press Alt+Tab".
 const twoScreens = () => window.screen.isExtended === true;
 async function pickScreen(withAudio, win = window) {
-  if (TEST) return testScreen();
+  if (TEST) return testScreen(win);
   const opts = {
     // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps.
     // Which tab the dialog opens on: two screens → "Entire screen" (share the projector screen,
@@ -623,7 +623,11 @@ async function startRecording(screen) {
   screen.addEventListener("ended", stopRecording);
   rec.start(1000);
   startTime = Date.now();
-  timer = setInterval(() => $("time").textContent = fmtTime(Date.now() - startTime), 250);
+  timer = setInterval(() => {
+    $("time").textContent = fmtTime(Date.now() - startTime);
+    // A share can be stopped without an "ended" event (e.g. its window closed): don't record black
+    if (screen.readyState === "ended") stopRecording();
+  }, 250);
   $("preview").srcObject = new MediaStream([video]); $("preview").play().catch(() => {});
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   window.addEventListener("beforeunload", guard);
@@ -643,6 +647,7 @@ async function finishRecording() {
   clearInterval(timer);
   recScreen?.removeEventListener("ended", stopRecording);
   if (role() === "both") { recScreen?.stop(); setBusExtra(null); } // own screen share ends with the recording
+  if (pipWin && pipKind === "both" && pipShares) { pipShares = false; clearInterval(pipTimer); try { pipWin.close(); } catch {} }
   comp?.stop(); comp = null;
   try { await wakeLock?.release(); } catch {}
   window.removeEventListener("beforeunload", guard);
@@ -982,6 +987,7 @@ async function lectSendDevices() {
   } catch {}
 }
 function lectStop(msg) {
+  if (pipWin && pipKind === "lect" && pipShares) { pipShares = false; clearInterval(pipTimer); try { pipWin.close(); } catch {} }
   clearInterval(lectTimer);
   stopLectMedia("audio"); stopLectMedia("camera"); lectMediaText();
   lectStream?.getTracks().forEach((t) => t.stop()); lectStream = null;
@@ -1031,10 +1037,33 @@ async function openSharePip(kind = "lect") {
   d.body.innerHTML = '<p>Starta bildspelet (F5) och talarvyn. Klicka sedan:</p>'
     + `<button id="b">${kind === "both" ? "Dela presentation och starta inspelningen" : "Dela presentation"}</button><p id="e"></p>`;
   d.getElementById("b").onclick = () => kind === "both" ? bothShare(pipWin) : lectShare(pipWin);
-  pipWin.addEventListener("pagehide", () => { pipWin = null; pipUi(); updateUi(); });
+  pipWin.addEventListener("pagehide", () => {
+    // A share started from this window dies with it (the browser stops it): stop cleanly and say so
+    const wasSharing = pipShares; pipShares = false; clearInterval(pipTimer);
+    pipWin = null;
+    if (wasSharing && pipKind === "lect" && lectStream) lectStop("Det lilla fönstret stängdes, så delningen slutade. Klicka Dela presentation igen.");
+    if (wasSharing && pipKind === "both" && rec) stopRecording();
+    pipUi(); updateUi();
+  });
   pipUi(); updateUi();
 }
 function pipSay(t) { const e = pipWin?.document.getElementById("e"); if (e) e.textContent = t; }
+// After sharing from the floating window: turn it into a small status box that must stay open
+let pipShares = false, pipTimer = 0;
+function pipSharing() {
+  if (!pipWin) return;
+  pipShares = true;
+  const d = pipWin.document;
+  d.body.innerHTML = '<p id="s" style="color:#ecebe7;font-weight:700;font-size:1.1rem"></p>'
+    + '<p>Klicka i PowerPoint för att fortsätta. <b style="color:#f2c46b">Låt det här fönstret vara öppet</b> – stängs det slutar delningen. Du kan dra det åt sidan.</p>';
+  const tick = () => {
+    const s = d.getElementById("s"); if (!s) return;
+    s.textContent = pipKind === "both"
+      ? (rec ? `● Spelar in ${fmtTime(Date.now() - startTime)}` : "Inspelningen är stoppad")
+      : $("lstatus").textContent;
+  };
+  tick(); clearInterval(pipTimer); pipTimer = setInterval(tick, 500);
+}
 // Two screens (projector at the lecturer): share the projector screen from this page, before or
 // after F5 – no floating window needed. One screen: the floating window (if the browser has it).
 function pipUi() {
@@ -1070,10 +1099,9 @@ async function lectShare(win) {
   lectError(""); pipSay("");
   try { lectStream = await pickScreen(false, win); } catch { pipSay("Avbrutet – klicka igen."); return; } // picker cancelled
   const track = lectStream.getVideoTracks()[0];
-  // Close the floating window: Windows then gives focus back to PowerPoint (the window under it),
-  // so the clicker works at once and the presenter view stays visible.
+  // The floating window must stay open: the share belongs to it, and closing it stops the share.
   const fromPip = win !== window;
-  if (fromPip) { try { pipWin?.close(); } catch {} }
+  if (fromPip) pipSharing();
   // "motion" = encode as video (keeps the frame rate for animations); full resolution is
   // protected separately by degradationPreference "maintain-resolution" below
   try { track.contentHint = "motion"; } catch {}
@@ -1167,7 +1195,7 @@ async function bothShare(win) {
   let s;
   try { s = await pickScreen($("sysaudio").checked, win); } catch { pipSay("Avbrutet – klicka igen."); return; }
   const fromPip = win !== window;
-  if (fromPip) { try { pipWin?.close(); } catch {} } // focus goes back to PowerPoint
+  if (fromPip) pipSharing(); // stays open: closing it would stop the share
   setBusExtra(s.getAudioTracks().length ? s : null);
   await startRecording(s.getVideoTracks()[0]);
   show("rback", !fromPip && !twoScreens());
