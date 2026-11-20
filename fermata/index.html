@@ -92,13 +92,19 @@
       <input id="lcode" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
       <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
       <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
-      <ol class="muted" style="margin-top:12px">
+      <ol class="muted" style="margin-top:12px" id="steps-pip">
+        <li>Skriv koden ovan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
+        <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Fönstret stänger sig och du är tillbaka i PowerPoint.</li>
+      </ol>
+      <ol class="muted hidden" style="margin-top:12px" id="steps-plain">
         <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
         <li>Gå tillbaka hit (<b>Alt+Tab</b>) och klicka <b>Dela presentation</b>.</li>
         <li>Klicka på <b>PowerPoint-bildspel</b> och sedan <b>Dela</b>.</li>
       </ol>
-      <p class="muted" id="lafter"></p>
+      <p class="muted hidden" id="lafter"></p>
+      <button id="pipbtn" class="primary big hidden">Visa knappen Dela presentation ovanpå PowerPoint</button>
       <button id="share" class="primary big">Dela presentation</button>
     </div>
     <div id="lectlive" class="hidden">
@@ -519,7 +525,7 @@ if (TEST) {
 // view stays visible on the laptop). One screen: bringing the slideshow forward would hide
 // the presenter view, so the browser keeps focus and the page says "press Alt+Tab".
 const twoScreens = () => window.screen.isExtended === true;
-async function pickScreen(withAudio) {
+async function pickScreen(withAudio, win = window) {
   if (TEST) return testScreen();
   const opts = {
     // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps.
@@ -529,11 +535,12 @@ async function pickScreen(withAudio) {
     selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
     windowAudio: "exclude",
   };
-  if (window.CaptureController) {
-    opts.controller = new CaptureController();
+  if (win.CaptureController) {
+    opts.controller = new win.CaptureController();
     try { opts.controller.setFocusBehavior(twoScreens() ? "focus-captured-surface" : "no-focus-change"); } catch {}
   }
-  return navigator.mediaDevices.getDisplayMedia(opts);
+  // Called from the floating window: the share dialog then belongs to that window
+  return win.navigator.mediaDevices.getDisplayMedia(opts);
 }
 
 // ================= Recorder (technician + both) =================
@@ -949,7 +956,7 @@ function lectStop(msg) {
   try { lectPeer?.destroy(); } catch {} lectPeer = null; lectConn = null;
   show("lectsetup", true); show("lectlive", false); show("lback", false);
   window.removeEventListener("beforeunload", guard);
-  updateUi();
+  updateUi(); pipUi();
   if (msg) lectError(msg);
 }
 // Ask for microphone/camera permission as soon as the code is typed, while the lecturer is
@@ -968,13 +975,44 @@ function lectAskPermissions() {
     return allowed;
   })();
 }
+// ---- Floating "Dela presentation" window (Document Picture-in-Picture, Chrome/Edge):
+// it stays on top of PowerPoint, so the lecturer never has to switch back to the browser.
+const PIP_OK = "documentPictureInPicture" in window;
+let pipWin = null;
+async function openSharePip() {
+  if (!PIP_OK || pipWin) return;
+  try {
+    pipWin = await documentPictureInPicture.requestWindow({ width: 340, height: 210 });
+  } catch (e) { console.warn(e); pipUi(); return; } // needs a click or key press: the button below opens it
+  const d = pipWin.document;
+  d.title = "Fermata";
+  const st = d.createElement("style");
+  st.textContent = `body{margin:0;font:15px/1.4 system-ui,"Segoe UI",sans-serif;background:#1f1f1d;color:#ecebe7;
+    display:flex;flex-direction:column;justify-content:center;gap:10px;padding:14px;box-sizing:border-box;height:100vh}
+    button{font:inherit;font-size:1.25rem;font-weight:700;border:0;border-radius:10px;padding:16px;cursor:pointer;
+    background:#5fae97;color:#0e1a16}button:disabled{opacity:.5}p{margin:0;color:#a09e98}#e{color:#f2c46b}`;
+  d.head.append(st);
+  d.body.innerHTML = '<p>Starta bildspelet (F5) och talarvyn. Klicka sedan:</p>'
+    + '<button id="b">Dela presentation</button><p id="e"></p>';
+  d.getElementById("b").onclick = () => lectShare(pipWin);
+  pipWin.addEventListener("pagehide", () => { pipWin = null; pipUi(); });
+  pipUi();
+}
+function pipSay(t) { const e = pipWin?.document.getElementById("e"); if (e) e.textContent = t; }
+function pipUi() {
+  show("pipbtn", PIP_OK && !pipWin && !lectStream && $("lcode").value.length === 6);
+  show("steps-pip", PIP_OK); show("steps-plain", !PIP_OK); show("share", !PIP_OK || !!lectStream);
+}
+$("pipbtn").onclick = openSharePip;
 $("lcode").addEventListener("input", (e) => {
   e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError("");
-  if (e.target.value.length === 6) lectAskPermissions();
+  if (e.target.value.length === 6) { openSharePip(); lectAskPermissions(); } // the key press allows opening the window
+  pipUi();
 });
 $("lallowmic").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
 $("lallowcam").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
 function lectAfterText() {
+  show("lafter", !PIP_OK);
   $("lafter").textContent = twoScreens()
     ? "Två skärmar: efter Dela kommer bildspelet fram av sig självt."
     : "En skärm: efter Dela trycker du Alt+Tab för att komma tillbaka till talarvyn.";
@@ -982,14 +1020,20 @@ function lectAfterText() {
 window.screen.addEventListener?.("change", lectAfterText);
 // Once they have left the page (Alt+Tab), the "go back" banner has done its job
 window.addEventListener("blur", () => { show("lback", false); show("rback", false); });
-lectAfterText();
-$("share").onclick = async () => {
+lectAfterText(); pipUi();
+$("share").onclick = () => lectShare(window);
+async function lectShare(win) {
   const code = $("lcode").value;
-  if (!/^\d{6}$/.test(code)) { lectError("Skriv den sexsiffriga koden från teknikern."); return; }
+  if (!/^\d{6}$/.test(code)) { lectError("Skriv den sexsiffriga koden från teknikern."); pipSay("Skriv koden på webbsidan först."); return; }
   if (!window.Peer) { lectError("Kunde inte ladda anslutningsdelen – kontrollera internet och ladda om sidan."); return; }
-  lectError("");
-  try { lectStream = await pickScreen(false); } catch { return; } // picker cancelled
+  if (lectStream) return;
+  lectError(""); pipSay("");
+  try { lectStream = await pickScreen(false, win); } catch { pipSay("Avbrutet – klicka igen."); return; } // picker cancelled
   const track = lectStream.getVideoTracks()[0];
+  // Close the floating window: Windows then gives focus back to PowerPoint (the window under it),
+  // so the clicker works at once and the presenter view stays visible.
+  const fromPip = win !== window;
+  if (fromPip) { try { pipWin?.close(); } catch {} }
   // "motion" = encode as video (keeps the frame rate for animations); full resolution is
   // protected separately by degradationPreference "maintain-resolution" below
   try { track.contentHint = "motion"; } catch {}
@@ -1000,8 +1044,9 @@ $("share").onclick = async () => {
   $("lstatus").textContent = "Ansluter till teknikern …";
   window.addEventListener("beforeunload", guard);
 
-  // One screen: the browser kept focus (so the presenter view is not hidden) – tell them how to go back
-  show("lback", !twoScreens());
+  // Shared from this page with one screen: the browser kept focus – tell them how to go back
+  show("lback", !fromPip && !twoScreens());
+  pipUi();
 
   // Microphone/camera permission was asked when the code was typed; ask now only if it wasn't
   if (!lectPerm) lectAskPermissions();
