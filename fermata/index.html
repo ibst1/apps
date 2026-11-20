@@ -172,9 +172,18 @@
 
   <section id="startcard" class="card hidden">
     <div id="bothhelp">
-      <ol class="muted">
+      <ol class="muted hidden" id="both-two">
+        <li>Klicka nedan, välj <b>projektorskärmen</b> och klicka <b>Dela</b>. Inspelningen startar; det går bra innan bildspelet har startat.</li>
+        <li>Starta bildspelet i PowerPoint (F5). Det hamnar på projektorn, talarvyn stannar på din skärm.</li>
+      </ol>
+      <ol class="muted hidden" id="both-pip">
+        <li>Klicka nedan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst.</li>
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka nedan och välj <b>PowerPoint-bildspel</b> (en skärm, efter F5) eller <b>projektorskärmen</b> (två skärmar, före eller efter F5), sedan <b>Dela</b>.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Inspelningen startar och du är tillbaka i PowerPoint.</li>
+      </ol>
+      <ol class="muted hidden" id="both-plain">
+        <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
+        <li>Gå tillbaka hit (<b>Alt+Tab</b>), klicka nedan, välj <b>PowerPoint-bildspel</b> och klicka <b>Dela</b>.</li>
       </ol>
     </div>
     <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
@@ -1003,11 +1012,14 @@ function lectAskPermissions() {
 // it stays on top of PowerPoint, so the lecturer never has to switch back to the browser.
 const PIP_OK = "documentPictureInPicture" in window;
 let pipWin = null;
-async function openSharePip() {
+// kind "lect": lecturer shares to the technician; kind "both": share and record on this computer
+let pipKind = "lect";
+async function openSharePip(kind = "lect") {
   if (!PIP_OK || pipWin) return;
+  pipKind = kind;
   try {
     pipWin = await documentPictureInPicture.requestWindow({ width: 340, height: 210 });
-  } catch (e) { console.warn(e); pipUi(); return; } // needs a click or key press: the button below opens it
+  } catch (e) { console.warn(e); pipUi(); updateUi(); return; } // needs a click or key press: a button opens it
   const d = pipWin.document;
   d.title = "Fermata";
   const st = d.createElement("style");
@@ -1017,10 +1029,10 @@ async function openSharePip() {
     background:#5fae97;color:#0e1a16}button:disabled{opacity:.5}p{margin:0;color:#a09e98}#e{color:#f2c46b}`;
   d.head.append(st);
   d.body.innerHTML = '<p>Starta bildspelet (F5) och talarvyn. Klicka sedan:</p>'
-    + '<button id="b">Dela presentation</button><p id="e"></p>';
-  d.getElementById("b").onclick = () => lectShare(pipWin);
-  pipWin.addEventListener("pagehide", () => { pipWin = null; pipUi(); });
-  pipUi();
+    + `<button id="b">${kind === "both" ? "Dela presentation och starta inspelningen" : "Dela presentation"}</button><p id="e"></p>`;
+  d.getElementById("b").onclick = () => kind === "both" ? bothShare(pipWin) : lectShare(pipWin);
+  pipWin.addEventListener("pagehide", () => { pipWin = null; pipUi(); updateUi(); });
+  pipUi(); updateUi();
 }
 function pipSay(t) { const e = pipWin?.document.getElementById("e"); if (e) e.textContent = t; }
 // Two screens (projector at the lecturer): share the projector screen from this page, before or
@@ -1032,10 +1044,10 @@ function pipUi() {
   show("share", !usePip || !!lectStream);
   show("lafter", !two && !PIP_OK);
 }
-$("pipbtn").onclick = openSharePip;
+$("pipbtn").onclick = () => openSharePip("lect");
 $("lcode").addEventListener("input", (e) => {
   e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError("");
-  if (e.target.value.length === 6) { if (!twoScreens()) openSharePip(); lectAskPermissions(); } // the key press allows opening the window
+  if (e.target.value.length === 6) { if (!twoScreens()) openSharePip("lect"); lectAskPermissions(); } // the key press allows opening the window
   pipUi();
 });
 $("lallowmic").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
@@ -1141,14 +1153,25 @@ async function lectShare(win) {
 $("unshare").onclick = () => { if (confirm("Sluta dela skärmen? Teknikerns inspelning stoppas.")) lectStop(); };
 
 // ================= Start / stop =================
+// "Båda" with one screen: the button opens the floating window instead (the slideshow window
+// only exists after F5, and the floating window stays on top of PowerPoint)
+const bothUsesPip = () => role() === "both" && PIP_OK && !twoScreens();
 $("start").onclick = async () => {
   if (role() === "tech") { if (remoteVideo) startRecording(remoteVideo); return; }
+  if (bothUsesPip()) { openSharePip("both"); return; }
+  bothShare(window);
+};
+async function bothShare(win) {
+  if (rec) return;
+  pipSay("");
   let s;
-  try { s = await pickScreen($("sysaudio").checked); } catch { return; }
+  try { s = await pickScreen($("sysaudio").checked, win); } catch { pipSay("Avbrutet – klicka igen."); return; }
+  const fromPip = win !== window;
+  if (fromPip) { try { pipWin?.close(); } catch {} } // focus goes back to PowerPoint
   setBusExtra(s.getAudioTracks().length ? s : null);
   await startRecording(s.getVideoTracks()[0]);
-  show("rback", !twoScreens());
-};
+  show("rback", !fromPip && !twoScreens());
+}
 $("stop").onclick = stopRecording;
 
 // ================= Roles =================
@@ -1164,8 +1187,12 @@ function updateUi() {
   show("nocomp", !CAN_COMPOSE);
   $("vsrc").disabled = !CAN_COMPOSE;
   show("startcard", r !== "lecturer" && !rec);
-  $("start").textContent = r === "tech" ? "Starta inspelningen" : "Dela presentation och starta inspelningen";
-  $("start").disabled = r === "tech" && !remoteVideo;
+  const two = twoScreens();
+  show("both-two", r === "both" && two); show("both-pip", r === "both" && !two && PIP_OK); show("both-plain", r === "both" && !two && !PIP_OK);
+  $("start").textContent = r === "tech" ? "Starta inspelningen"
+    : bothUsesPip() ? (pipWin ? "Knappen Dela presentation ligger ovanpå PowerPoint" : "Visa knappen Dela presentation ovanpå PowerPoint")
+    : "Dela presentation och starta inspelningen";
+  $("start").disabled = (r === "tech" && !remoteVideo) || (bothUsesPip() && !!pipWin);
   show("reccard", !!rec);
   show("filescard", r !== "lecturer");
   document.querySelectorAll('input[name="role"]').forEach((i) => i.disabled = !!rec || !!lectStream);
@@ -1179,7 +1206,10 @@ function applyRole() {
 }
 const savedRole = store.get("role");
 if (savedRole) { const i = document.querySelector(`input[name="role"][value="${savedRole}"]`); if (i) i.checked = true; }
-document.querySelectorAll('input[name="role"]').forEach((i) => i.addEventListener("change", applyRole));
+document.querySelectorAll('input[name="role"]').forEach((i) => i.addEventListener("change", () => {
+  applyRole();
+  if (bothUsesPip()) openSharePip("both"); // the click on "Båda" allows opening the floating window at once
+}));
 if (!TEST && (!navigator.mediaDevices?.getDisplayMedia || !window.MediaRecorder)) {
   show("unsupported", true); $("share").disabled = true;
 }
