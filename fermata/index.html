@@ -58,6 +58,7 @@
   ul.files li:first-child { border-top: 0; }
   ul.files .name { flex: 1 1 260px; overflow-wrap: anywhere; }
   .hidden { display: none !important; }
+  .bigback { font-size: 1.5rem; font-weight: 700; background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 16px; margin: 0 0 12px; text-align: center; }
   ol { padding-left: 20px; margin: 0; }
   .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
   .roles label { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
@@ -92,15 +93,16 @@
       <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
       <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
       <ol class="muted" style="margin-top:12px">
+        <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka nedan. Välj fliken <b>Fönster</b> → <b>PowerPoint-bildspel</b> (”PowerPoint Slide Show”). Bildspelet skickas även när talarvyn ligger ovanpå.</li>
-        <li>Tillåt mikrofon/kamera om webbläsaren frågar.</li>
-        <li>Raden ”delar din skärm” kan du dölja med <b>Dölj</b>.</li>
+        <li>Gå tillbaka hit (<b>Alt+Tab</b>) och klicka <b>Dela presentation</b>.</li>
+        <li>Klicka på <b>PowerPoint-bildspel</b> och sedan <b>Dela</b>.</li>
       </ol>
-      <p class="muted">Har du två skärmar fungerar det också att välja <b>Hela skärmen</b> → skärmen med bildspelet. Minimera inte bildspelsfönstret – då blir bilden svart.</p>
-      <button id="share" class="primary big">Dela skärmen</button>
+      <p class="muted" id="lafter"></p>
+      <button id="share" class="primary big">Dela presentation</button>
     </div>
     <div id="lectlive" class="hidden">
+      <p class="bigback hidden" id="lback">Klart! Tryck <b>Alt+Tab</b> för att gå tillbaka till talarvyn.</p>
       <div class="status"><div class="dot ok" id="ldot"></div><span id="lstatus">Ansluter …</span></div>
       <p class="muted" id="lmedia"></p>
       <p class="muted">Inget sparas på den här datorn. Låt fliken vara öppen tills föreläsningen är slut.</p>
@@ -156,13 +158,14 @@
     <div id="bothhelp">
       <ol class="muted">
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka nedan och välj fliken <b>Fönster</b> → <b>PowerPoint-bildspel</b> (eller <b>Hela skärmen</b> → skärmen med bildspelet).</li>
+        <li>Gå tillbaka hit (<b>Alt+Tab</b>), klicka nedan, klicka på <b>PowerPoint-bildspel</b> och sedan <b>Dela</b>.</li>
       </ol>
     </div>
     <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
   </section>
 
   <section id="reccard" class="card hidden">
+    <p class="bigback hidden" id="rback">Inspelningen är igång. Tryck <b>Alt+Tab</b> för att gå tillbaka till talarvyn.</p>
     <div class="status"><div class="dot"></div><span>Spelar in</span><span class="time" id="time">0:00:00</span></div>
     <div class="muted" id="recinfo"></div>
     <video id="preview" muted playsinline></video>
@@ -512,18 +515,23 @@ if (TEST) {
     return cv.captureStream(30);
   };
 }
+// Two screens: the slideshow is on the other one, so it can safely get focus (the presenter
+// view stays visible on the laptop). One screen: bringing the slideshow forward would hide
+// the presenter view, so the browser keeps focus and the page says "press Alt+Tab".
+const twoScreens = () => window.screen.isExtended === true;
 async function pickScreen(withAudio) {
   if (TEST) return testScreen();
   const opts = {
-    // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps
-    video: { frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, cursor: "always" },
+    // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps.
+    // displaySurface "window": the dialog opens on the Window tab, where "PowerPoint Slide Show" is.
+    video: { displaySurface: "window", frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, cursor: "always" },
     audio: withAudio, systemAudio: withAudio ? "include" : "exclude",
     selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
     windowAudio: "exclude",
   };
   if (window.CaptureController) {
     opts.controller = new CaptureController();
-    try { opts.controller.setFocusBehavior("no-focus-change"); } catch {}
+    try { opts.controller.setFocusBehavior(twoScreens() ? "focus-captured-surface" : "no-focus-change"); } catch {}
   }
   return navigator.mediaDevices.getDisplayMedia(opts);
 }
@@ -939,12 +947,42 @@ function lectStop(msg) {
   lectStream?.getTracks().forEach((t) => t.stop()); lectStream = null;
   try { lectCall?.close(); } catch {} lectCall = null;
   try { lectPeer?.destroy(); } catch {} lectPeer = null; lectConn = null;
-  show("lectsetup", true); show("lectlive", false);
+  show("lectsetup", true); show("lectlive", false); show("lback", false);
   window.removeEventListener("beforeunload", guard);
   updateUi();
   if (msg) lectError(msg);
 }
-$("lcode").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError(""); });
+// Ask for microphone/camera permission as soon as the code is typed, while the lecturer is
+// still on this page (later the question would pop up behind the slideshow).
+let lectPerm = null;
+function lectAskPermissions() {
+  lectPerm = (async () => {
+    const allowed = { audio: $("lallowmic").checked, camera: $("lallowcam").checked };
+    for (const kind of ["audio", "camera"]) {
+      if (!allowed[kind]) continue;
+      try {
+        const s = await navigator.mediaDevices.getUserMedia(kind === "audio" ? { audio: true } : { video: true });
+        s.getTracks().forEach((t) => t.stop());
+      } catch { allowed[kind] = false; }
+    }
+    return allowed;
+  })();
+}
+$("lcode").addEventListener("input", (e) => {
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError("");
+  if (e.target.value.length === 6) lectAskPermissions();
+});
+$("lallowmic").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
+$("lallowcam").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
+function lectAfterText() {
+  $("lafter").textContent = twoScreens()
+    ? "Två skärmar: efter Dela kommer bildspelet fram av sig självt."
+    : "En skärm: efter Dela trycker du Alt+Tab för att komma tillbaka till talarvyn.";
+}
+window.screen.addEventListener?.("change", lectAfterText);
+// Once they have left the page (Alt+Tab), the "go back" banner has done its job
+window.addEventListener("blur", () => { show("lback", false); show("rback", false); });
+lectAfterText();
 $("share").onclick = async () => {
   const code = $("lcode").value;
   if (!/^\d{6}$/.test(code)) { lectError("Skriv den sexsiffriga koden från teknikern."); return; }
@@ -962,15 +1000,12 @@ $("share").onclick = async () => {
   $("lstatus").textContent = "Ansluter till teknikern …";
   window.addEventListener("beforeunload", guard);
 
-  // Ask for microphone/camera permission now, so the technician can switch later without a prompt
-  lectAllowed = { audio: $("lallowmic").checked, camera: $("lallowcam").checked };
-  for (const kind of ["audio", "camera"]) {
-    if (!lectAllowed[kind]) continue;
-    try {
-      const s = await navigator.mediaDevices.getUserMedia(kind === "audio" ? { audio: true } : { video: true });
-      s.getTracks().forEach((t) => t.stop());
-    } catch { lectAllowed[kind] = false; }
-  }
+  // One screen: the browser kept focus (so the presenter view is not hidden) – tell them how to go back
+  show("lback", !twoScreens());
+
+  // Microphone/camera permission was asked when the code was typed; ask now only if it wasn't
+  if (!lectPerm) lectAskPermissions();
+  lectAllowed = await lectPerm;
 
   lectTarget = ID_PREFIX + code;
   lectPeer = new Peer(PEER_CONFIG);
@@ -1039,6 +1074,7 @@ $("start").onclick = async () => {
   try { s = await pickScreen($("sysaudio").checked); } catch { return; }
   setBusExtra(s.getAudioTracks().length ? s : null);
   await startRecording(s.getVideoTracks()[0]);
+  show("rback", !twoScreens());
 };
 $("stop").onclick = stopRecording;
 
@@ -1054,7 +1090,7 @@ function updateUi() {
   show("nocomp", !CAN_COMPOSE);
   $("vsrc").disabled = !CAN_COMPOSE;
   show("startcard", r !== "lecturer" && !rec);
-  $("start").textContent = r === "tech" ? "Starta inspelningen" : "Välj skärm och starta inspelningen";
+  $("start").textContent = r === "tech" ? "Starta inspelningen" : "Dela presentation och starta inspelningen";
   $("start").disabled = r === "tech" && !remoteVideo;
   show("reccard", !!rec);
   show("filescard", r !== "lecturer");
