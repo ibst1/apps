@@ -1266,7 +1266,6 @@ function helperUse() {
   const r = role();
   if (r === "lecturer" && !lectStream) {
     if (/^\d{6}$/.test($("lcode").value)) lectShare(window, new MediaStream([helperGen]));
-    else lectError("Bildspelet har startat – skriv koden från teknikern så skickas det.");
   } else if (r === "both" && !rec) bothShare(window, helperGen);
 }
 function helperEnd() {
@@ -1293,7 +1292,9 @@ async function helperFrame(buf) {
 setInterval(() => { helperFps = helperCount / 2; helperCount = 0; if (helperOk) helperUi(); }, 2000);
 function helperUi() {
   const r = role(), live = helperGen && helperGen.readyState === "live";
+  const waitingForCode = r === "lecturer" && !lectStream;
   const txt = !helperOk ? ""
+    : live && waitingForCode ? "✓ Fermata för Windows har bildspelet, utan muspekare. Skriv koden från teknikern så skickas det."
     : live ? `✓ Fermata för Windows tar bildspelet utan muspekare (${helperFps.toFixed(0)} bilder/s).`
     : "✓ Fermata för Windows är igång. Starta bildspelet i PowerPoint (F5) – det tas automatiskt, utan muspekare. Du behöver inte trycka Dela.";
   for (const id of ["helperL", "helperB"]) { $(id).textContent = txt; show(id, !!txt); }

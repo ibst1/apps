@@ -23,6 +23,7 @@ static class Program
     static NotifyIcon _tray;
     static ToolStripMenuItem _statusItem;
     static string _status = "";
+    static StatusWindow _window;
     static byte[] _last;            // newest JPEG of the slideshow
     static string Dump;
     static DateTime _lastAt;
@@ -31,7 +32,7 @@ static class Program
     static void Main(string[] args)
     {
         using var mutex = new Mutex(true, "Fermata.Helper.SingleInstance", out bool first);
-        if (!first) { OpenPage(); return; }          // already running: just show the page
+        if (!first) { ShowRunning(); OpenPage(); return; }   // already running: bring its window forward, show the page
 
         ApplicationConfiguration.Initialize();
         _server = new PageServer();
@@ -49,9 +50,12 @@ static class Program
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Öppna Fermata-sidan", null, (_, _) => OpenPage());
         menu.Items.Add("Visa logg", null, (_, _) => { try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch { } });
-        menu.Items.Add("Avsluta", null, (_, _) => { _tray.Visible = false; StopCapture(); Application.Exit(); });
-        _tray = new NotifyIcon { Icon = MakeIcon(), Text = "Fermata", ContextMenuStrip = menu, Visible = true };
-        _tray.DoubleClick += (_, _) => OpenPage();
+        var icon = MakeIcon();
+        void Quit() { _tray.Visible = false; StopCapture(); Application.Exit(); }
+        menu.Items.Add("Avsluta", null, (_, _) => _window.Close());
+        _tray = new NotifyIcon { Icon = icon, Text = "Fermata", ContextMenuStrip = menu, Visible = true };
+        _window = new StatusWindow(icon, OpenPage, Quit) { IsCapturing = () => _capture != null };
+        _tray.DoubleClick += (_, _) => { _window.WindowState = FormWindowState.Normal; _window.Activate(); };
 
         var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _server.Changed += () => ui.Post(_ => { Tick(); if (_capture != null) AnnounceStart(); }, null);
@@ -62,10 +66,8 @@ static class Program
         int di = Array.IndexOf(args, "--dump");
         if (di >= 0 && di + 1 < args.Length) Dump = args[di + 1];
         if (!args.Contains("--no-open")) OpenPage();
-        _tray.ShowBalloonTip(4000, "Fermata är igång",
-            "Välj Föreläsare eller Båda på Fermata-sidan. När du startar bildspelet tas det automatiskt, utan muspekare.", ToolTipIcon.Info);
         Tick();
-        Application.Run();
+        Application.Run(_window);
         StopCapture();
     }
 
@@ -102,13 +104,31 @@ static class Program
         if (_capture != null && last != null && DateTime.UtcNow - _lastAt > TimeSpan.FromSeconds(1))
         { _lastAt = DateTime.UtcNow; _server.SendFrame(last, Wants); }
 
-        string role = clients.LastOrDefault()?.Role ?? "";
+        // The mode of the page that uses the slideshow (another open Fermata tab may be "Tekniker")
+        string role = (clients.LastOrDefault(Wants) ?? clients.LastOrDefault())?.Role ?? "";
         string mode = role switch { "lecturer" => "Föreläsare", "both" => "Båda", "tech" => "Tekniker", _ => "" };
-        SetStatus(clients.Count == 0 ? "Väntar på Fermata-sidan"
-            : !active ? $"Sidan är ansluten ({(mode == "" ? "inget läge valt" : mode)}) – välj Föreläsare eller Båda"
-            : _capture != null ? $"Bildspelet tas utan muspekare ({mode}) · {_capture.Fps} bilder/s"
-            : $"Sidan är ansluten ({mode}) – starta bildspelet (F5)");
+        string state, detail; bool ok = true;
+        if (clients.Count == 0) { state = "Väntar på Fermata-sidan"; detail = "Klicka Öppna Fermata-sidan och välj Föreläsare eller Båda."; ok = false; }
+        else if (!active) { state = $"Sidan är ansluten – läge: {(mode == "" ? "inget valt" : mode)}"; detail = "Välj Föreläsare eller Båda på sidan."; ok = false; }
+        else if (_capture != null) { state = "Bildspelet tas utan muspekare" + (_capture.Fps > 0 ? $" ({_capture.Fps} bilder/s)" : " (bilden står still)"); detail = $"Läge på sidan: {mode}. " + (mode == "Föreläsare" ? "Det skickas till teknikern när koden är ifylld." : "Sidan spelar in."); }
+        else { state = $"Redo – läge: {mode}"; detail = "Starta bildspelet i PowerPoint (F5), gärna med talarvy. Det tas automatiskt, utan muspekare."; }
+        SetStatus(state);
+        _window?.Show(state, detail, ok);
     }
+
+    /// <summary>A second start: bring the running program's window to the front.</summary>
+    static void ShowRunning()
+    {
+        try
+        {
+            var me = Process.GetCurrentProcess();
+            foreach (var p in Process.GetProcessesByName(me.ProcessName))
+                if (p.Id != me.Id && p.MainWindowHandle != IntPtr.Zero) { ShowWindow(p.MainWindowHandle, 9); SetForegroundWindow(p.MainWindowHandle); }
+        }
+        catch { }
+    }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
 
     static void AnnounceStart()
     {
