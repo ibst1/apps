@@ -130,8 +130,8 @@
     <p class="muted" id="tstats" style="white-space:pre-line"></p>
     <p class="note hidden" id="twarn"></p>
     <video id="remote" class="hidden" muted playsinline></video>
-    <button id="projbtn" class="primary big" disabled>Visa på projektorn</button>
-    <p class="muted" id="projinfo">Öppnar föreläsarens bild i helskärm på den andra skärmen (HDMI). Webbläsaren frågar första gången om sidan får använda dina skärmar – svara Tillåt.</p>
+    <button id="projbtn" class="primary big" disabled>Visa presentationen på projektor ansluten till teknikerdatorn</button>
+    <p class="muted" id="projinfo">Behövs bara när projektorn sitter i den här datorn och inte i föreläsarens. Föreläsarens bildspel visas då i helskärm på den andra skärmen (HDMI). Knappen fungerar när föreläsaren delar. Webbläsaren frågar första gången om sidan får använda dina skärmar – svara Tillåt.</p>
     <p class="muted"><button class="ghost" id="newcode">Ny kod</button></p>
   </section>
 
@@ -852,7 +852,7 @@ function projAttach() {
 }
 function projUi() {
   $("projbtn").disabled = !remoteVideo && !projOpen();
-  $("projbtn").textContent = projOpen() ? "Stäng projektorbilden" : "Visa på projektorn";
+  $("projbtn").textContent = projOpen() ? "Sluta visa presentationen på projektorn" : "Visa presentationen på projektor ansluten till teknikerdatorn";
   $("projbtn").className = (projOpen() ? "ghost" : "primary") + " big";
 }
 $("projbtn").onclick = async () => {
