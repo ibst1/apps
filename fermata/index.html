@@ -92,11 +92,12 @@
       <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
       <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
       <ol class="muted" style="margin-top:12px">
-        <li>Starta bildspelet i PowerPoint (F5).</li>
-        <li>Klicka nedan och välj fliken <b>Hela skärmen</b> → den skärm som visar bildspelet.</li>
+        <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
+        <li>Klicka nedan. Välj fliken <b>Fönster</b> → <b>PowerPoint-bildspel</b> (”PowerPoint Slide Show”). Bildspelet skickas även när talarvyn ligger ovanpå.</li>
         <li>Tillåt mikrofon/kamera om webbläsaren frågar.</li>
         <li>Raden ”delar din skärm” kan du dölja med <b>Dölj</b>.</li>
       </ol>
+      <p class="muted">Har du två skärmar fungerar det också att välja <b>Hela skärmen</b> → skärmen med bildspelet. Minimera inte bildspelsfönstret – då blir bilden svart.</p>
       <button id="share" class="primary big">Dela skärmen</button>
     </div>
     <div id="lectlive" class="hidden">
@@ -115,6 +116,8 @@
     <div class="status"><div class="dot idle" id="tdot"></div><span id="tstatus">Startar …</span></div>
     <p class="muted" id="tstats"></p>
     <video id="remote" class="hidden" muted playsinline></video>
+    <button id="projbtn" class="primary big" disabled>Visa på projektorn</button>
+    <p class="muted" id="projinfo">Öppnar föreläsarens bild i helskärm på den andra skärmen (HDMI). Webbläsaren frågar första gången om sidan får använda dina skärmar – svara Tillåt.</p>
     <p class="muted"><button class="ghost" id="newcode">Ny kod</button></p>
   </section>
 
@@ -151,8 +154,8 @@
   <section id="startcard" class="card hidden">
     <div id="bothhelp">
       <ol class="muted">
-        <li>Starta bildspelet i PowerPoint (F5).</li>
-        <li>Klicka nedan och välj fliken <b>Hela skärmen</b> → den skärm som visar bildspelet.</li>
+        <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
+        <li>Klicka nedan och välj fliken <b>Fönster</b> → <b>PowerPoint-bildspel</b> (eller <b>Hela skärmen</b> → skärmen med bildspelet).</li>
       </ol>
     </div>
     <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
@@ -506,6 +509,7 @@ async function pickScreen(withAudio) {
     video: { frameRate: { ideal: 60 }, width: { ideal: 3840 }, height: { ideal: 2160 }, cursor: "always" },
     audio: withAudio, systemAudio: withAudio ? "include" : "exclude",
     selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
+    windowAudio: "exclude",
   };
   if (window.CaptureController) {
     opts.controller = new CaptureController();
@@ -699,6 +703,7 @@ function techStart() {
       show("remote", true); $("remote").srcObject = new MediaStream([v]); $("remote").play().catch(() => {});
       techStatus("Föreläsarens skärm är ansluten", "ok");
       startStats(call);
+      projAttach(); projUi();
       updateUi();
       if (sel.audio.startsWith("local:")) setTimeout(applyAudio, 3000); // re-measure picture delay
       if ($("autorec").checked) startRecording(remoteVideo);
@@ -710,6 +715,7 @@ function techStart() {
       techStatus("Föreläsaren slutade dela – väntar på föreläsaren", "idle");
       if (rec && $("autorec").checked) stopRecording();
       remoteDevices = { audio: [], video: [] }; buildSelects();
+      projAttach(); projUi();
       updateUi();
     };
     call.on("close", end);
@@ -789,6 +795,58 @@ function startStats(call) {
     } catch {}
   }, 2000);
 }
+
+// ================= Projector: the lecturer's picture full screen on the other display =================
+let projWin = null, projScreens = null;
+function projOpen() { return projWin && !projWin.closed; }
+function projAttach() {
+  if (!projOpen()) return;
+  const v = projWin.document.querySelector("video");
+  if (!v) return;
+  v.srcObject = remoteVideo ? new MediaStream([remoteVideo]) : null; // black while nobody shares
+  v.play().catch(() => {});
+}
+function projUi() {
+  $("projbtn").disabled = !remoteVideo && !projOpen();
+  $("projbtn").textContent = projOpen() ? "Stäng projektorbilden" : "Visa på projektorn";
+  $("projbtn").className = (projOpen() ? "ghost" : "primary") + " big";
+}
+$("projbtn").onclick = async () => {
+  if (projOpen()) { projWin.close(); projWin = null; projUi(); return; }
+  // Find the other screen (Window Management API, Chrome/Edge). The first time this asks for
+  // permission, which can use up the click: then the window is blocked and a second click works.
+  let target = null;
+  if ("getScreenDetails" in window) {
+    try {
+      projScreens = projScreens || await window.getScreenDetails();
+      const others = projScreens.screens.filter((s) => s !== projScreens.currentScreen);
+      target = others.find((s) => !s.isPrimary) || others[0] || null;
+    } catch (e) { console.warn(e); }
+  }
+  const feat = target
+    ? `popup,fullscreen,left=${target.availLeft},top=${target.availTop},width=${target.availWidth},height=${target.availHeight}`
+    : "popup,width=960,height=540";
+  projWin = window.open("", "fermata-projektor", feat);
+  if (!projWin) { $("projinfo").textContent = "Fönstret blockerades – klicka på knappen en gång till."; return; }
+  projWin.document.open();
+  projWin.document.write(`<!doctype html><html lang="sv"><head><meta charset="utf-8"><title>Fermata – projektor</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}
+#hint{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:#222;color:#ddd;font:16px system-ui;padding:8px 14px;border-radius:8px}
+:fullscreen #hint{display:none}body.idle{cursor:none}</style></head>
+<body><video autoplay muted playsinline></video><div id="hint">Dubbelklicka för helskärm</div>
+<script>
+document.addEventListener("dblclick",()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{}));
+let t;document.addEventListener("mousemove",()=>{document.body.classList.remove("idle");clearTimeout(t);t=setTimeout(()=>document.body.classList.add("idle"),2000)});
+setTimeout(()=>document.getElementById("hint").style.display="none",8000);
+<\/script></body></html>`);
+  projWin.document.close();
+  projAttach();
+  $("projinfo").textContent = target
+    ? "Projektorbilden visas på den andra skärmen. Dubbelklicka på den för helskärm om den inte redan är det."
+    : "Hittade ingen andra skärm – dra fönstret till projektorn och dubbelklicka för helskärm.";
+  const watch = setInterval(() => { if (!projOpen()) { clearInterval(watch); projWin = null; projUi(); } }, 1000);
+  projUi();
+};
 
 function sendStatus() {
   const msg = { rec: !!rec, since: rec ? startTime : 0 };
@@ -872,6 +930,8 @@ $("share").onclick = async () => {
   try { lectStream = await pickScreen(false); } catch { return; } // picker cancelled
   const track = lectStream.getVideoTracks()[0];
   try { track.contentHint = "detail"; } catch {} // keep full resolution (text must stay sharp)
+  const surf = track.getSettings().displaySurface;
+  if (surf === "browser") lectError("Du delar en webbläsarflik – välj hellre fönstret ”PowerPoint-bildspel” eller hela skärmen.");
   track.addEventListener("ended", () => lectStop());
   show("lectsetup", false); show("lectlive", true); updateUi();
   $("lstatus").textContent = "Ansluter till teknikern …";
