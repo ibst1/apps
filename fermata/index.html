@@ -114,7 +114,8 @@
     <h2>Kod till föreläsaren</h2>
     <div class="bigcode" id="code">······</div>
     <div class="status"><div class="dot idle" id="tdot"></div><span id="tstatus">Startar …</span></div>
-    <p class="muted" id="tstats"></p>
+    <p class="muted" id="tstats" style="white-space:pre-line"></p>
+    <p class="note hidden" id="twarn"></p>
     <video id="remote" class="hidden" muted playsinline></video>
     <button id="projbtn" class="primary big" disabled>Visa på projektorn</button>
     <p class="muted" id="projinfo">Öppnar föreläsarens bild i helskärm på den andra skärmen (HDMI). Webbläsaren frågar första gången om sidan får använda dina skärmar – svara Tillåt.</p>
@@ -145,8 +146,8 @@
     <label class="check" id="autobox"><input type="checkbox" id="autorec" checked> <span>Starta inspelningen automatiskt när föreläsarens skärm kommer in, och stoppa när den försvinner.</span></label>
     <label for="quality">Bildkvalitet</label>
     <select id="quality">
+      <option value="20000000">Mycket hög – för animationer, ca 9 GB per timme</option>
       <option value="10000000">Hög – ca 4,5 GB per timme</option>
-      <option value="20000000">Mycket hög – för mycket animationer, ca 9 GB per timme</option>
       <option value="5000000">Normal – ca 2,3 GB per timme</option>
     </select>
   </section>
@@ -196,6 +197,11 @@ const CAN_COMPOSE = !!(window.MediaStreamTrackProcessor && window.MediaStreamTra
 // start high: add x-google bitrate hints (kbit/s) to every video codec in the SDP.
 function sdpBoost(sdp) {
   return sdp.replace(/m=video[\s\S]*?(?=\r\nm=|$)/, (sec) => {
+    // Put H.264 first: most laptops encode it in hardware, so animations keep full frame rate
+    const h264 = [...sec.matchAll(/a=rtpmap:(\d+) H264\//g)].map((m) => m[1])
+      .filter((pt) => new RegExp(`a=fmtp:${pt} [^\\r\\n]*packetization-mode=1`).test(sec));
+    if (h264.length) sec = sec.replace(/^(m=video \d+ [A-Z\/]+ )([\d ]+)/, (l, head, pts) =>
+      head + [...h264, ...pts.split(" ").filter((p) => !h264.includes(p))].join(" "));
     const hint = "x-google-min-bitrate=3000;x-google-start-bitrate=10000;x-google-max-bitrate=20000";
     const pts = [...sec.matchAll(/a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\//g)].map((m) => m[1]);
     for (const pt of pts) {
@@ -335,7 +341,10 @@ class Compositor {
         if (done) break;
         if (this.readers[key] !== reader) { value.close(); break; }
         this.frames[key]?.close(); this.frames[key] = value;
-        this.render();
+        // Every screen frame is drawn (animations keep their full frame rate). Camera frames
+        // only drive the output while the screen is still (a static slide sends few frames).
+        if (key === "screen") { this.lastScreen = performance.now(); this.render(true); }
+        else if (performance.now() - (this.lastScreen || 0) > 40) this.render();
       }
     })();
   }
@@ -346,7 +355,7 @@ class Compositor {
   }
   render(force) {
     const now = performance.now();
-    if (!force && now - this.last < 1000 / 61) return;
+    if (!force && now - this.last < 1000 / 31) return;
     if (this.out.desiredSize !== null && this.out.desiredSize <= 0) return; // encoder busy
     this.last = now;
     const { screen, cam } = this.frames, W = this.canvas.width, H = this.canvas.height, g = this.g;
@@ -506,7 +515,8 @@ if (TEST) {
 async function pickScreen(withAudio) {
   if (TEST) return testScreen();
   const opts = {
-    video: { frameRate: { ideal: 60 }, width: { ideal: 3840 }, height: { ideal: 2160 }, cursor: "always" },
+    // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps
+    video: { frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, cursor: "always" },
     audio: withAudio, systemAudio: withAudio ? "include" : "exclude",
     selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
     windowAudio: "exclude",
@@ -651,7 +661,7 @@ async function saveFile(name, f) {
 }
 
 // ================= Technician: receive from the lecturer =================
-let techPeer = null, activeCall = null, statusConns = new Set(), remoteVideo = null, statsTimer = 0;
+let techPeer = null, activeCall = null, statusConns = new Set(), remoteVideo = null, statsTimer = 0, lectEnc = null;
 
 function techStatus(text, state) {
   $("tstatus").textContent = text;
@@ -683,6 +693,7 @@ function techStart() {
     conn.on("open", () => { sendStatus(); sendWant(); });
     conn.on("data", (d) => {
       if (d?.devices) { remoteDevices = d.devices; buildSelects().then(updateSourceInfo); }
+      if (d?.enc) lectEnc = d.enc;
       if (d?.mediaError) $("tstats").textContent = `Föreläsarens ${d.mediaError === "audio" ? "mikrofon" : "kamera"} gick inte att öppna (inte tillåten?).`;
     });
     conn.on("close", () => statusConns.delete(conn));
@@ -711,7 +722,7 @@ function techStart() {
     const end = () => {
       if (activeCall !== call) return;
       activeCall = null; remoteVideo = null; clearInterval(statsTimer);
-      show("remote", false); $("remote").srcObject = null; $("tstats").textContent = "";
+      show("remote", false); $("remote").srcObject = null; $("tstats").textContent = ""; lectEnc = null; show("twarn", false);
       techStatus("Föreläsaren slutade dela – väntar på föreläsaren", "idle");
       if (rec && $("autorec").checked) stopRecording();
       remoteDevices = { audio: [], video: [] }; buildSelects();
@@ -791,7 +802,19 @@ function startStats(call) {
         const pair = stats.get(pairId), local = pair && stats.get(pair.localCandidateId);
         relay = local?.candidateType === "relay";
       }
-      $("tstats").textContent = txt + (relay ? " · via omväg (servern) – kvaliteten kan bli sämre" : "");
+      // What the lecturer's computer sends, and whether something holds it back
+      const e = lectEnc, warn = [];
+      let enc = "";
+      if (e) {
+        enc = `Föreläsarens dator skickar ${e.w || "?"}×${e.h || "?"} i ${e.fps} bilder/s · ${e.codec}`
+          + (e.hw === true ? " (hårdvara)" : e.hw === false ? " (processor)" : "");
+        if (e.limit === "cpu") warn.push("föreläsarens dator hinner inte koda – stäng andra program där");
+        if (e.limit === "bandwidth") warn.push("nätet räcker inte till full kvalitet");
+      }
+      if (relay) warn.push("bilden går via omväg (servern) – kvaliteten kan bli sämre");
+      $("tstats").textContent = [txt, enc].filter(Boolean).join("\n");
+      $("twarn").textContent = warn.length ? "⚠ " + warn.join(" · ") : "";
+      show("twarn", warn.length > 0);
     } catch {}
   }, 2000);
 }
@@ -929,7 +952,9 @@ $("share").onclick = async () => {
   lectError("");
   try { lectStream = await pickScreen(false); } catch { return; } // picker cancelled
   const track = lectStream.getVideoTracks()[0];
-  try { track.contentHint = "detail"; } catch {} // keep full resolution (text must stay sharp)
+  // "motion" = encode as video (keeps the frame rate for animations); full resolution is
+  // protected separately by degradationPreference "maintain-resolution" below
+  try { track.contentHint = "motion"; } catch {}
   const surf = track.getSettings().displaySurface;
   if (surf === "browser") lectError("Du delar en webbläsarflik – välj hellre fönstret ”PowerPoint-bildspel” eller hela skärmen.");
   track.addEventListener("ended", () => lectStop());
@@ -982,8 +1007,22 @@ $("share").onclick = async () => {
       if (pc.connectionState === "failed") lectStop("Anslutningen till teknikern bröts. Klicka Dela skärmen igen.");
     });
     lectCall.on("close", () => lectStream && lectStop("Teknikern kopplade bort anslutningen."));
-    lectTimer = setInterval(() => {
+    // Every 2 s: tell the technician what this computer actually sends
+    let encTick = 0;
+    lectTimer = setInterval(async () => {
       if (pc.connectionState !== "connected") return;
+      if (++encTick % 4 === 0) try {
+        const st = await pc.getStats();
+        st.forEach((r) => {
+          if (r.type !== "outbound-rtp" || r.kind !== "video") return;
+          lectConn?.open && lectConn.send({ enc: {
+            w: r.frameWidth, h: r.frameHeight, fps: Math.round(r.framesPerSecond || 0),
+            codec: (st.get(r.codecId)?.mimeType || "").replace("video/", ""),
+            impl: r.encoderImplementation || "", hw: r.powerEfficientEncoder,
+            limit: r.qualityLimitationReason || "none",
+          } });
+        });
+      } catch {}
       $("ldot").className = "dot " + (techRec.rec ? "" : "ok");
       $("lstatus").textContent = techRec.rec
         ? `Skärmen skickas · teknikern spelar in ${fmtTime(Date.now() - techRec.since)}`
