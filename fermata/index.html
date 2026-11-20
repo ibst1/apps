@@ -58,6 +58,7 @@
   ul.files li:first-child { border-top: 0; }
   ul.files .name { flex: 1 1 260px; overflow-wrap: anywhere; }
   .hidden { display: none !important; }
+  .helper { background: var(--accent); color: var(--accent-text); border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; font-weight: 600; }
   .bigback { font-size: 1.5rem; font-weight: 700; background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 16px; margin: 0 0 12px; text-align: center; }
   ol { padding-left: 20px; margin: 0; }
   .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
@@ -92,6 +93,12 @@
       <input id="lcode" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
       <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
       <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
+      <p class="helper hidden" id="helperL"></p>
+      <p class="muted hidden" id="helperdlL">💡 Slipp dela själv och få bort muspekaren: <a href="Starta%20Fermata.cmd" download>ladda ner Starta Fermata.cmd</a> och dubbelklicka på den. Den startar allt – inget att installera.</p>
+      <ol class="muted hidden" style="margin-top:12px" id="steps-helper">
+        <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
+        <li>Starta bildspelet i PowerPoint (F5), gärna med talarvy. Det skickas automatiskt till teknikern – utan muspekare, och du kan skrolla i anteckningarna.</li>
+      </ol>
       <ol class="muted hidden" style="margin-top:12px" id="steps-two">
         <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Klicka <b>Dela presentation</b>, välj <b>projektorskärmen</b> och klicka <b>Dela</b>. Det går bra innan bildspelet har startat.</li>
@@ -174,6 +181,8 @@
 
   <section id="startcard" class="card hidden">
     <div id="bothhelp">
+      <p class="helper hidden" id="helperB"></p>
+      <p class="muted hidden" id="helperdlB">💡 Slipp dela själv och få bort muspekaren: <a href="Starta%20Fermata.cmd" download>ladda ner Starta Fermata.cmd</a> och dubbelklicka på den. Den startar allt – inget att installera.</p>
       <ol class="muted hidden" id="both-two">
         <li>Klicka nedan, välj <b>projektorskärmen</b> och klicka <b>Dela</b>. Inspelningen startar; det går bra innan bildspelet har startat.</li>
         <li>Starta bildspelet i PowerPoint (F5). Det hamnar på projektorn, talarvyn stannar på din skärm.</li>
@@ -591,7 +600,8 @@ async function startRecording(screen) {
   let video = screen;
   if (CAN_COMPOSE) {
     const s = screen.getSettings();
-    const w = s.width && s.height ? s.width : 1920, h = s.width && s.height ? s.height : 1080;
+    const known = s.width && s.height ? s : (screen === helperGen && helperSize) ? helperSize : null; // helper track: size of its frames
+    const w = known ? known.width : 1920, h = known ? known.height : 1080;
     comp = new Compositor(w - (w % 2), h - (h % 2));
     comp.setSource("screen", screen);
     comp.setSource("cam", camTrack);
@@ -1025,7 +1035,7 @@ let pipWin = null;
 // kind "lect": lecturer shares to the technician; kind "both": share and record on this computer
 let pipKind = "lect";
 async function openSharePip(kind = "lect") {
-  if (!PIP_OK || pipWin) return;
+  if (!PIP_OK || pipWin || helperOk) return;
   pipKind = kind;
   try {
     pipWin = await documentPictureInPicture.requestWindow({ width: 340, height: 210 });
@@ -1074,16 +1084,21 @@ function pipSharing() {
 // Two screens (projector at the lecturer): share the projector screen from this page, before or
 // after F5 – no floating window needed. One screen: the floating window (if the browser has it).
 function pipUi() {
-  const two = twoScreens(), usePip = PIP_OK && !two;
-  show("pipbtn", usePip && !pipWin && !lectStream && $("lcode").value.length === 6);
-  show("steps-two", two); show("steps-pip", usePip); show("steps-plain", !two && !PIP_OK);
-  show("share", !usePip || !!lectStream);
-  show("lafter", !two && !PIP_OK);
+  const two = twoScreens(), usePip = PIP_OK && !two, h = helperOk; // with Fermata for Windows no manual sharing is needed
+  show("pipbtn", !h && usePip && !pipWin && !lectStream && $("lcode").value.length === 6);
+  show("steps-two", !h && two); show("steps-pip", !h && usePip); show("steps-plain", !h && !two && !PIP_OK);
+  show("steps-helper", h);
+  show("share", !h && (!usePip || !!lectStream));
+  show("lafter", !h && !two && !PIP_OK);
 }
 $("pipbtn").onclick = () => openSharePip("lect");
 $("lcode").addEventListener("input", (e) => {
   e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError("");
-  if (e.target.value.length === 6) { if (!twoScreens()) openSharePip("lect"); lectAskPermissions(); } // the key press allows opening the window
+  if (e.target.value.length === 6) {
+    if (!twoScreens() && !helperOk) openSharePip("lect");   // the key press allows opening the window
+    lectAskPermissions();
+    helperUse();                                            // slideshow already running in Fermata for Windows
+  }
   pipUi();
 });
 $("lallowmic").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
@@ -1098,16 +1113,18 @@ window.screen.addEventListener?.("change", lectAfterText);
 window.addEventListener("blur", () => { show("lback", false); show("rback", false); });
 lectAfterText(); pipUi();
 $("share").onclick = () => lectShare(window);
-async function lectShare(win) {
+// ready: a stream from Fermata for Windows (the slideshow without the pointer) – no share dialog
+async function lectShare(win, ready) {
   const code = $("lcode").value;
   if (!/^\d{6}$/.test(code)) { lectError("Skriv den sexsiffriga koden från teknikern."); pipSay("Skriv koden på webbsidan först."); return; }
   if (!window.Peer) { lectError("Kunde inte ladda anslutningsdelen – kontrollera internet och ladda om sidan."); return; }
   if (lectStream) return;
   lectError(""); pipSay("");
-  try { lectStream = await pickScreen(false, win); } catch { pipSay("Avbrutet – klicka igen."); return; } // picker cancelled
+  if (ready) lectStream = ready;
+  else try { lectStream = await pickScreen(false, win); } catch { pipSay("Avbrutet – klicka igen."); return; } // picker cancelled
   const track = lectStream.getVideoTracks()[0];
   // The floating window must stay open: the share belongs to it, and closing it stops the share.
-  const fromPip = win !== window;
+  const fromPip = !ready && win !== window;
   if (fromPip) pipSharing();
   // "motion" = encode as video (keeps the frame rate for animations); full resolution is
   // protected separately by degradationPreference "maintain-resolution" below
@@ -1120,7 +1137,7 @@ async function lectShare(win) {
   window.addEventListener("beforeunload", guard);
 
   // Shared from this page with one screen: the browser kept focus – tell them how to go back
-  show("lback", !fromPip && !twoScreens());
+  show("lback", !ready && !fromPip && !twoScreens());
   pipUi();
 
   // Microphone/camera permission was asked when the code was typed; ask now only if it wasn't
@@ -1190,14 +1207,15 @@ $("unshare").onclick = () => { if (confirm("Sluta dela skärmen? Teknikerns insp
 // ================= Start / stop =================
 // "Båda" with one screen: the button opens the floating window instead (the slideshow window
 // only exists after F5, and the floating window stays on top of PowerPoint)
-const bothUsesPip = () => role() === "both" && PIP_OK && !twoScreens();
+const bothUsesPip = () => role() === "both" && PIP_OK && !twoScreens() && !helperOk;
 $("start").onclick = async () => {
   if (role() === "tech") { if (remoteVideo) startRecording(remoteVideo); return; }
   if (bothUsesPip()) { openSharePip("both"); return; }
   bothShare(window);
 };
-async function bothShare(win) {
+async function bothShare(win, readyTrack) {
   if (rec) return;
+  if (readyTrack) { await startRecording(readyTrack); return; } // from Fermata for Windows
   pipSay("");
   let s;
   try { s = await pickScreen($("sysaudio").checked, win); } catch { pipSay("Avbrutet – klicka igen."); return; }
@@ -1208,6 +1226,82 @@ async function bothShare(win) {
   show("rback", !fromPip && !twoScreens());
 }
 $("stop").onclick = stopRecording;
+
+// ================= Fermata for Windows (local helper program) =================
+// The helper runs on this computer and listens on 127.0.0.1 only. It follows the mode chosen
+// here, and when PowerPoint starts a slideshow it sends the slideshow window – captured
+// without the mouse pointer, also behind the presenter view – as JPEG frames. They become a
+// video track that replaces the browser's share dialog.
+const HELPER_URL = "ws://127.0.0.1:47811";
+var helperWs = null, helperOk = false, helperGen = null, helperWriter = null, helperBusy = 0, helperRetry = 0, helperFps = 0, helperCount = 0, helperSize = null; // var: read by UI code above
+function helperConnect() {
+  if (helperWs || !window.MediaStreamTrackGenerator) return;
+  let ws;
+  try { ws = new WebSocket(HELPER_URL); } catch { return; }
+  ws.binaryType = "arraybuffer"; helperWs = ws;
+  ws.onopen = () => { helperOk = true; helperSendRole(); helperUi(); };
+  ws.onclose = ws.onerror = () => {
+    if (helperWs !== ws) return;
+    helperWs = null; const was = helperOk; helperOk = false;
+    helperEnd(); if (was) helperUi();
+    clearTimeout(helperRetry); helperRetry = setTimeout(helperConnect, 3000);
+  };
+  ws.onmessage = (e) => {
+    if (typeof e.data !== "string") return helperFrame(e.data);
+    try { const m = JSON.parse(e.data); if (m.type === "show-start") helperStart(); else if (m.type === "show-end") helperEnd(); } catch {}
+  };
+}
+function helperSendRole() { if (helperOk) try { helperWs.send(JSON.stringify({ type: "role", role: role() })); } catch {} }
+function helperStart() {
+  if (!helperGen || helperGen.readyState !== "live") {
+    helperGen = new MediaStreamTrackGenerator({ kind: "video" });
+    helperWriter = helperGen.writable.getWriter();
+    helperSize = null;                                    // set by the first frame; then helperUse() runs
+  }
+  helperUi();
+}
+// Hand the slideshow track to the chosen mode (also when the code is typed after F5)
+function helperUse() {
+  if (!helperGen || helperGen.readyState !== "live" || !helperSize) return;
+  const r = role();
+  if (r === "lecturer" && !lectStream) {
+    if (/^\d{6}$/.test($("lcode").value)) lectShare(window, new MediaStream([helperGen]));
+    else lectError("Bildspelet har startat – skriv koden från teknikern så skickas det.");
+  } else if (r === "both" && !rec) bothShare(window, helperGen);
+}
+function helperEnd() {
+  if (!helperGen) return;
+  const g = helperGen; helperGen = null; helperWriter = null;
+  if (lectStream?.getVideoTracks()[0] === g) lectStop();
+  if (rec && recScreen === g) stopRecording();
+  try { g.stop(); } catch {}
+  helperUi();
+}
+async function helperFrame(buf) {
+  if (!helperWriter || helperBusy > 1) return;          // still drawing the previous one: skip (newest wins)
+  helperBusy++;
+  try {
+    const bmp = await createImageBitmap(new Blob([buf], { type: "image/jpeg" }));
+    const vf = new VideoFrame(bmp, { timestamp: Math.round(performance.now() * 1000) });
+    const first = !helperSize;
+    if (first) helperSize = { width: bmp.width, height: bmp.height };
+    bmp.close();
+    if (helperWriter) { await helperWriter.write(vf); helperCount++; } else vf.close();
+    if (first) helperUse();                               // start sending/recording once the size is known
+  } catch {} finally { helperBusy--; }
+}
+setInterval(() => { helperFps = helperCount / 2; helperCount = 0; if (helperOk) helperUi(); }, 2000);
+function helperUi() {
+  const r = role(), live = helperGen && helperGen.readyState === "live";
+  const txt = !helperOk ? ""
+    : live ? `✓ Fermata för Windows tar bildspelet utan muspekare (${helperFps.toFixed(0)} bilder/s).`
+    : "✓ Fermata för Windows är igång. Starta bildspelet i PowerPoint (F5) – det tas automatiskt, utan muspekare. Du behöver inte trycka Dela.";
+  for (const id of ["helperL", "helperB"]) { $(id).textContent = txt; show(id, !!txt); }
+  // Not running: offer the one start file (Windows only)
+  const win = /Windows/.test(navigator.userAgent);
+  for (const id of ["helperdlL", "helperdlB"]) show(id, !helperOk && win);
+  pipUi(); updateUi();
+}
 
 // ================= Roles =================
 function updateUi() {
@@ -1222,8 +1316,9 @@ function updateUi() {
   show("nocomp", !CAN_COMPOSE);
   $("vsrc").disabled = !CAN_COMPOSE;
   show("startcard", r !== "lecturer" && !rec);
-  const two = twoScreens();
-  show("both-two", r === "both" && two); show("both-pip", r === "both" && !two && PIP_OK); show("both-plain", r === "both" && !two && !PIP_OK);
+  const two = twoScreens(), h = helperOk && r === "both";   // Fermata for Windows: recording starts by itself at F5
+  show("both-two", !h && r === "both" && two); show("both-pip", !h && r === "both" && !two && PIP_OK); show("both-plain", !h && r === "both" && !two && !PIP_OK);
+  show("start", !h);
   $("start").textContent = r === "tech" ? "Starta inspelningen"
     : bothUsesPip() ? (pipWin ? "Knappen Dela presentation ligger ovanpå PowerPoint" : "Visa knappen Dela presentation ovanpå PowerPoint")
     : "Dela presentation och starta inspelningen";
@@ -1238,6 +1333,8 @@ function applyRole() {
   if (r !== "lecturer") { initSources(); refreshFiles(); }
   if (r === "tech") techStart();
   updateUi();
+  if (r === "lecturer" || r === "both") helperConnect();   // look for Fermata for Windows on this computer
+  helperSendRole(); helperUse(); helperUi();
 }
 const savedRole = store.get("role");
 if (savedRole) { const i = document.querySelector(`input[name="role"][value="${savedRole}"]`); if (i) i.checked = true; }
