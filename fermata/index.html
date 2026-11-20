@@ -1396,8 +1396,10 @@ var helperChain = Promise.resolve(), helperTsOffset = null, helperLastTs = 0;
 function helperFrame(buf) {
   if (!helperWriter || helperBusy > 12) return;         // very far behind: skip
   helperBusy++;
-  const capUs = Number(new DataView(buf).getBigInt64(0, true));
-  const decoded = createImageBitmap(new Blob([new Uint8Array(buf, 8)], { type: "image/jpeg" }));   // starts now, in parallel
+  // An older program sends the JPEG alone (it starts with FF D8): no capture time then
+  const b = new Uint8Array(buf, 0, 2), old = b[0] === 0xFF && b[1] === 0xD8;
+  const capUs = old ? 0 : Number(new DataView(buf).getBigInt64(0, true));
+  const decoded = createImageBitmap(new Blob([old ? buf : new Uint8Array(buf, 8)], { type: "image/jpeg" }));   // starts now, in parallel
   helperChain = helperChain.then(async () => {
     let bmp;
     try { bmp = await decoded; } catch { return; }
