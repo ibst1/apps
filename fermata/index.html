@@ -92,6 +92,11 @@
       <input id="lcode" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
       <label class="check"><input type="checkbox" id="lallowmic" checked> <span>Teknikern får använda min mikrofon</span></label>
       <label class="check"><input type="checkbox" id="lallowcam" checked> <span>Teknikern får använda min kamera</span></label>
+      <ol class="muted hidden" style="margin-top:12px" id="steps-two">
+        <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
+        <li>Klicka <b>Dela presentation</b>, välj <b>projektorskärmen</b> och klicka <b>Dela</b>. Det går bra innan bildspelet har startat.</li>
+        <li>Starta bildspelet i PowerPoint (F5). Det hamnar på projektorn och skickas till teknikern; talarvyn stannar på din skärm.</li>
+      </ol>
       <ol class="muted" style="margin-top:12px" id="steps-pip">
         <li>Skriv koden ovan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
@@ -164,7 +169,7 @@
     <div id="bothhelp">
       <ol class="muted">
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Gå tillbaka hit (<b>Alt+Tab</b>), klicka nedan, klicka på <b>PowerPoint-bildspel</b> och sedan <b>Dela</b>.</li>
+        <li>Klicka nedan och välj <b>PowerPoint-bildspel</b> (en skärm, efter F5) eller <b>projektorskärmen</b> (två skärmar, före eller efter F5), sedan <b>Dela</b>.</li>
       </ol>
     </div>
     <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
@@ -529,8 +534,9 @@ async function pickScreen(withAudio, win = window) {
   if (TEST) return testScreen();
   const opts = {
     // Up to 1920×1200 at 60 fps: larger screens are scaled down so laptops can keep 60 fps.
-    // displaySurface "window": the dialog opens on the Window tab, where "PowerPoint Slide Show" is.
-    video: { displaySurface: "window", frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, cursor: "always" },
+    // Which tab the dialog opens on: two screens → "Entire screen" (share the projector screen,
+    // even before F5); one screen → "Window" (where "PowerPoint Slide Show" is, after F5).
+    video: { displaySurface: twoScreens() ? "monitor" : "window", frameRate: { ideal: 60, max: 60 }, width: { max: 1920 }, height: { max: 1200 }, cursor: "always" },
     audio: withAudio, systemAudio: withAudio ? "include" : "exclude",
     selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include",
     windowAudio: "exclude",
@@ -999,24 +1005,28 @@ async function openSharePip() {
   pipUi();
 }
 function pipSay(t) { const e = pipWin?.document.getElementById("e"); if (e) e.textContent = t; }
+// Two screens (projector at the lecturer): share the projector screen from this page, before or
+// after F5 – no floating window needed. One screen: the floating window (if the browser has it).
 function pipUi() {
-  show("pipbtn", PIP_OK && !pipWin && !lectStream && $("lcode").value.length === 6);
-  show("steps-pip", PIP_OK); show("steps-plain", !PIP_OK); show("share", !PIP_OK || !!lectStream);
+  const two = twoScreens(), usePip = PIP_OK && !two;
+  show("pipbtn", usePip && !pipWin && !lectStream && $("lcode").value.length === 6);
+  show("steps-two", two); show("steps-pip", usePip); show("steps-plain", !two && !PIP_OK);
+  show("share", !usePip || !!lectStream);
+  show("lafter", !two && !PIP_OK);
 }
 $("pipbtn").onclick = openSharePip;
 $("lcode").addEventListener("input", (e) => {
   e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); lectError("");
-  if (e.target.value.length === 6) { openSharePip(); lectAskPermissions(); } // the key press allows opening the window
+  if (e.target.value.length === 6) { if (!twoScreens()) openSharePip(); lectAskPermissions(); } // the key press allows opening the window
   pipUi();
 });
 $("lallowmic").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
 $("lallowcam").addEventListener("change", () => $("lcode").value.length === 6 && lectAskPermissions());
 function lectAfterText() {
-  show("lafter", !PIP_OK);
-  $("lafter").textContent = twoScreens()
-    ? "Två skärmar: efter Dela kommer bildspelet fram av sig självt."
-    : "En skärm: efter Dela trycker du Alt+Tab för att komma tillbaka till talarvyn.";
+  $("lafter").textContent = "En skärm: efter Dela trycker du Alt+Tab för att komma tillbaka till talarvyn.";
+  pipUi();
 }
+// A projector plugged in or out while the page is open switches the instructions
 window.screen.addEventListener?.("change", lectAfterText);
 // Once they have left the page (Alt+Tab), the "go back" banner has done its job
 window.addEventListener("blur", () => { show("lback", false); show("rback", false); });
