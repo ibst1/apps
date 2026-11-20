@@ -100,13 +100,15 @@
       <ol class="muted" style="margin-top:12px" id="steps-pip">
         <li>Skriv koden ovan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Klicka sedan en gång i PowerPoint (till exempel i anteckningarna) så fungerar klickaren igen. Låt det lilla fönstret vara öppet – det visar att delningen pågår.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Det lilla fönstret krymper till en rad; låt det vara öppet.</li>
+        <li>Klicka en gång i anteckningarna i talarvyn och ställ sedan <b>musen i skärmens nedre högra hörn</b> – annars syns muspekaren i bilden. Bläddra med klickaren eller tangentbordet.</li>
       </ol>
       <ol class="muted hidden" style="margin-top:12px" id="steps-plain">
         <li>Skriv koden ovan. Svara <b>Tillåt</b> om webbläsaren frågar om mikrofon eller kamera.</li>
         <li>Starta bildspelet i PowerPoint (F5). Vill du se talarvyn: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
         <li>Gå tillbaka hit (<b>Alt+Tab</b>) och klicka <b>Dela presentation</b>.</li>
         <li>Klicka på <b>PowerPoint-bildspel</b> och sedan <b>Dela</b>.</li>
+        <li>Ställ <b>musen i skärmens nedre högra hörn</b> – annars syns muspekaren i bilden.</li>
       </ol>
       <p class="muted hidden" id="lafter"></p>
       <button id="pipbtn" class="primary big hidden">Visa knappen Dela presentation ovanpå PowerPoint</button>
@@ -179,11 +181,13 @@
       <ol class="muted hidden" id="both-pip">
         <li>Klicka nedan. Ett litet fönster med knappen <b>Dela presentation</b> lägger sig överst.</li>
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
-        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Inspelningen startar. Klicka en gång i PowerPoint (till exempel i anteckningarna) så fungerar klickaren igen. Låt det lilla fönstret vara öppet – det visar att inspelningen pågår.</li>
+        <li>Klicka <b>Dela presentation</b> i det lilla fönstret, sedan <b>PowerPoint-bildspel</b> och <b>Dela</b>. Inspelningen startar och det lilla fönstret krymper till en rad; låt det vara öppet.</li>
+        <li>Klicka en gång i anteckningarna i talarvyn och ställ sedan <b>musen i skärmens nedre högra hörn</b> – annars syns muspekaren i inspelningen. Bläddra med klickaren eller tangentbordet.</li>
       </ol>
       <ol class="muted hidden" id="both-plain">
         <li>Starta bildspelet i PowerPoint (F5). Talarvy: högerklicka i bildspelet → <b>Visa talarvy</b>.</li>
         <li>Gå tillbaka hit (<b>Alt+Tab</b>), klicka nedan, välj <b>PowerPoint-bildspel</b> och klicka <b>Dela</b>.</li>
+        <li>Ställ <b>musen i skärmens nedre högra hörn</b> – annars syns muspekaren i inspelningen.</li>
       </ol>
     </div>
     <button id="start" class="primary big">Välj skärm och starta inspelningen</button>
@@ -1054,8 +1058,11 @@ function pipSharing() {
   if (!pipWin) return;
   pipShares = true;
   const d = pipWin.document;
-  d.body.innerHTML = '<p id="s" style="color:#ecebe7;font-weight:700;font-size:1.1rem"></p>'
-    + '<p>Klicka i PowerPoint för att fortsätta. <b style="color:#f2c46b">Låt det här fönstret vara öppet</b> – stängs det slutar delningen. Du kan dra det åt sidan.</p>';
+  // One narrow line: the window cannot be minimised from the page, but it can be made small
+  d.body.innerHTML = '<p id="s" style="color:#ecebe7;font-weight:700;font-size:.95rem;white-space:nowrap"></p>'
+    + '<p style="font-size:.8rem;white-space:nowrap">Låt fönstret vara öppet · musen i nedre högra hörnet</p>';
+  d.body.style.padding = "6px 10px"; d.body.style.gap = "2px";
+  try { pipWin.resizeTo(330, 64); } catch (e) { console.warn(e); } // needs the click still being "fresh"
   const tick = () => {
     const s = d.getElementById("s"); if (!s) return;
     s.textContent = pipKind === "both"
