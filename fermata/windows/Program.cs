@@ -24,6 +24,8 @@ static class Program
     static ToolStripMenuItem _statusItem;
     static string _status = "";
     static StatusWindow _window;
+    static RecordingBadge _badge;
+    static Icon _iconIdle, _iconRec;
     static byte[] _last;            // newest JPEG of the slideshow
     static string Dump;
     static DateTime _lastAt;
@@ -50,11 +52,13 @@ static class Program
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Öppna Fermata-sidan", null, (_, _) => OpenPage());
         menu.Items.Add("Visa logg", null, (_, _) => { try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch { } });
-        var icon = MakeIcon();
-        void Quit() { _tray.Visible = false; StopCapture(); Application.Exit(); }
+        var icon = MakeIcon(Color.FromArgb(0x2F, 0x6F, 0x5E));
+        _iconIdle = icon; _iconRec = MakeIcon(Color.FromArgb(0xC6, 0x28, 0x28));
+        _badge = new RecordingBadge();
+        void Quit() { _tray.Visible = false; _badge.HideBadge(); StopCapture(); Application.Exit(); }
         menu.Items.Add("Avsluta", null, (_, _) => _window.Close());
         _tray = new NotifyIcon { Icon = icon, Text = "Fermata", ContextMenuStrip = menu, Visible = true };
-        _window = new StatusWindow(icon, OpenPage, Quit) { IsCapturing = () => _capture != null };
+        _window = new StatusWindow(icon, OpenPage, Quit) { IsCapturing = () => _capture != null, IdleIcon = _iconIdle, RecIcon = _iconRec };
         _tray.DoubleClick += (_, _) => { _window.WindowState = FormWindowState.Normal; _window.Activate(); };
 
         var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
@@ -112,8 +116,23 @@ static class Program
         else if (!active) { state = $"Sidan är ansluten – läge: {(mode == "" ? "inget valt" : mode)}"; detail = "Välj Föreläsare eller Båda på sidan."; ok = false; }
         else if (_capture != null) { state = "Bildspelet tas utan muspekare" + (_capture.Fps > 0 ? $" ({_capture.Fps} bilder/s)" : " (bilden står still)"); detail = $"Läge på sidan: {mode}. " + (mode == "Föreläsare" ? "Det skickas till teknikern när koden är ifylld." : "Sidan spelar in."); }
         else { state = $"Redo – läge: {mode}"; detail = "Starta bildspelet i PowerPoint (F5), gärna med talarvy. Det tas automatiskt, utan muspekare."; }
+
+        // Recording indicator: the page reports whether a recording runs (Båda: this computer,
+        // Föreläsare: the technician's). Red badge on the speaker's screen, red tray icon and window text.
+        var recClient = clients.Where(c => Wants(c) && c.Rec && DateTime.UtcNow - c.RecAt < TimeSpan.FromSeconds(4)).LastOrDefault();
+        bool recording = recClient != null && _capture != null;
+        if (recording)
+        {
+            var el = TimeSpan.FromMilliseconds(recClient.RecMs) + (DateTime.UtcNow - recClient.RecAt);
+            _badge.ShowRecording(el, _hwnd);
+            state = $"●  Spelar in  {(int)el.TotalHours}:{el.Minutes:00}:{el.Seconds:00}";
+            detail = (mode == "Föreläsare" ? "Teknikern spelar in bildspelet" : "Bildspelet spelas in") + ", utan muspekare."
+                     + (_capture.Fps > 0 ? $" {_capture.Fps} bilder/s." : "");
+        }
+        else _badge.HideBadge();
+        if (_tray.Icon != (recording ? _iconRec : _iconIdle)) _tray.Icon = recording ? _iconRec : _iconIdle;
         SetStatus(state);
-        _window?.Show(state, detail, ok);
+        _window?.Show(state, detail, ok, recording);
     }
 
     /// <summary>A second start: bring the running program's window to the front.</summary>
@@ -157,14 +176,14 @@ static class Program
         try { Process.Start(new ProcessStartInfo(PageUrl) { UseShellExecute = true }); } catch { }
     }
 
-    static Icon MakeIcon()
+    static Icon MakeIcon(Color color)
     {
         using var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
-            using var bg = new SolidBrush(Color.FromArgb(0x2F, 0x6F, 0x5E));
+            using var bg = new SolidBrush(color);
             g.FillEllipse(bg, 1, 1, 30, 30);
             // a fermata: an arc over a dot
             using var pen = new Pen(Color.White, 3f);

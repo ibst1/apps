@@ -27,6 +27,9 @@ sealed class PageServer
     {
         public WebSocket Ws;
         public string Role = "";
+        public bool Rec;                    // the page says a recording is running
+        public long RecMs;                  // how long it has run, as of RecAt
+        public DateTime RecAt;
         public int Sending;                 // 1 while a frame is being sent (newer frames are skipped)
         public readonly SemaphoreSlim Gate = new(1, 1);
     }
@@ -115,6 +118,13 @@ sealed class PageServer
                     using var doc = JsonDocument.Parse(ms.ToArray());
                     var root = doc.RootElement;
                     if (root.TryGetProperty("role", out var role)) { c.Role = role.GetString() ?? ""; Log.Write($"Mode on page: {c.Role}"); Changed?.Invoke(); }
+                    if (root.TryGetProperty("rec", out var recEl))
+                    {
+                        bool on = recEl.ValueKind == JsonValueKind.True;
+                        if (on != c.Rec) Log.Write(on ? "Recording started (page)" : "Recording stopped (page)");
+                        c.Rec = on; c.RecAt = DateTime.UtcNow;
+                        c.RecMs = root.TryGetProperty("elapsed", out var el) && el.TryGetInt64(out var elapsedMs) ? elapsedMs : 0;
+                    }
                 }
                 catch { }
             }

@@ -1,6 +1,6 @@
 # Build Fermata for Windows: one self-contained exe (no .NET install, no admin).
-# Output: dist\Fermata.exe + "Starta Fermata.cmd", zipped as dist\Fermata-Windows.zip,
-# and a copy in %USERPROFILE%\Program\Fermata (the folder locked LU computers allow).
+# Output: dist\Fermata.exe + "Starta Fermata.cmd", and a copy in %USERPROFILE%\Program\Fermata
+# (the folder locked LU computers allow). Publish: gh release upload fermata-windows dist\Fermata.exe --clobber --repo ibst1/apps
 param([switch]$NoInstall)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -12,7 +12,6 @@ if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 if ($LASTEXITCODE) { throw "publish failed" }
 Copy-Item (Join-Path $root "Starta Fermata.cmd") $dist
 Get-ChildItem $dist -Exclude "Fermata.exe", "Starta Fermata.cmd" | Remove-Item -Recurse -Force
-Compress-Archive -Path (Join-Path $dist "Fermata.exe"), (Join-Path $dist "Starta Fermata.cmd") -DestinationPath (Join-Path $dist "Fermata-Windows.zip") -Force
 if (-not $NoInstall) {
   $dest = Join-Path $env:USERPROFILE "Program\Fermata"
   New-Item -ItemType Directory -Force $dest | Out-Null

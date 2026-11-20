@@ -58,6 +58,8 @@
   ul.files li:first-child { border-top: 0; }
   ul.files .name { flex: 1 1 260px; overflow-wrap: anywhere; }
   .hidden { display: none !important; }
+  .dlcard { border: 2px solid var(--accent); }
+  a.btnlink { display: block; text-align: center; text-decoration: none; border-radius: 10px; font-weight: 700; box-sizing: border-box; }
   .helper { background: var(--accent); color: var(--accent-text); border-radius: 8px; padding: 10px 12px; margin: 12px 0 0; font-weight: 600; }
   .bigback { font-size: 1.5rem; font-weight: 700; background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 16px; margin: 0 0 12px; text-align: center; }
   ol { padding-left: 20px; margin: 0; }
@@ -70,7 +72,19 @@
 <body>
 <main>
   <h1>Fermata</h1>
-  <p class="sub">Spela in presentationsskärm, ljud och kamera i webbläsaren – inget att installera.</p>
+  <p class="sub">Spela in och sänd PowerPoint-bildspel med ljud och kamera – utan installation.</p>
+
+  <section id="dlcard" class="card dlcard hidden">
+    <h2>Fermata för Windows – rekommenderas</h2>
+    <p>Tar bildspelet automatiskt när du trycker F5: utan muspekare, med talarvyn kvar och utan att du behöver dela något. Inget att installera.</p>
+    <a class="primary big btnlink" href="Starta%20Fermata.cmd" download>Ladda ner Starta Fermata.cmd</a>
+    <ol class="muted" style="margin-top:12px">
+      <li>Öppna filen när den har laddats ner. Varnar webbläsaren: välj <b>Behåll</b>. Säger Windows ”Windows skyddade datorn”: <b>Mer information → Kör ändå</b>.</li>
+      <li>Första gången hämtas programmet (cirka 70 MB). Ett litet Fermata-fönster visas nere till höger, och den här sidan kopplas till det.</li>
+      <li>Välj Föreläsare eller Båda nedan och starta bildspelet.</li>
+    </ol>
+    <p class="muted">Utan programmet fungerar Fermata också, men då delar du bildspelet själv och muspekaren kan synas i bilden.</p>
+  </section>
 
   <div id="unsupported" class="card note hidden">
     Den här webbläsaren kan inte dela eller spela in skärmen. Använd Chrome eller Edge på en dator.
@@ -1290,6 +1304,15 @@ async function helperFrame(buf) {
   } catch {} finally { helperBusy--; }
 }
 setInterval(() => { helperFps = helperCount / 2; helperCount = 0; if (helperOk) helperUi(); }, 2000);
+// Tell Fermata for Windows whether a recording is running, so it can show a red "recording" badge
+// on the speaker's screen. Lecturer: the technician's recording; Båda: this page's recording.
+setInterval(() => {
+  if (!helperOk) return;
+  const r = role();
+  const on = r === "both" ? !!rec : r === "lecturer" ? !!(lectStream && techRec.rec) : false;
+  const elapsed = !on ? 0 : r === "both" ? Date.now() - startTime : Date.now() - techRec.since;
+  try { helperWs.send(JSON.stringify({ type: "status", rec: on, elapsed: Math.max(0, Math.round(elapsed)) })); } catch {}
+}, 1000);
 function helperUi() {
   const r = role(), live = helperGen && helperGen.readyState === "live";
   const waitingForCode = r === "lecturer" && !lectStream;
@@ -1298,9 +1321,10 @@ function helperUi() {
     : live ? `✓ Fermata för Windows tar bildspelet utan muspekare (${helperFps.toFixed(0)} bilder/s).`
     : "✓ Fermata för Windows är igång. Starta bildspelet i PowerPoint (F5) – det tas automatiskt, utan muspekare. Du behöver inte trycka Dela.";
   for (const id of ["helperL", "helperB"]) { $(id).textContent = txt; show(id, !!txt); }
-  // Not running: offer the one start file (Windows only)
+  // Not running: the download card at the top is the main way (Windows; not needed by the technician)
   const win = /Windows/.test(navigator.userAgent);
-  for (const id of ["helperdlL", "helperdlB"]) show(id, !helperOk && win);
+  show("dlcard", win && !helperOk && r !== "tech");
+  for (const id of ["helperdlL", "helperdlB"]) show(id, false);
   pipUi(); updateUi();
 }
 

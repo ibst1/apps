@@ -42,10 +42,13 @@ sealed class StatusWindow : Form
         };
     }
 
-    public void Show(string state, string detail, bool ok)
+    public void Show(string state, string detail, bool ok, bool recording = false)
     {
-        _state.Text = state;
-        _state.ForeColor = ok ? Color.FromArgb(0x5F, 0xAE, 0x97) : Color.FromArgb(0xF2, 0xC4, 0x6B);
-        _detail.Text = detail;
+        if (_state.Text != state) _state.Text = state;
+        _state.ForeColor = recording ? Color.FromArgb(0xEF, 0x53, 0x50) : ok ? Color.FromArgb(0x5F, 0xAE, 0x97) : Color.FromArgb(0xF2, 0xC4, 0x6B);
+        if (_detail.Text != detail) _detail.Text = detail;
+        var want = recording ? RecIcon ?? Icon : IdleIcon ?? Icon;
+        if (!ReferenceEquals(Icon, want)) Icon = want;
     }
+    public Icon IdleIcon, RecIcon;
 }
