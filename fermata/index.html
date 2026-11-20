@@ -144,25 +144,30 @@
     <div class="srcinfo" id="ainfo">Inget ljud valt</div>
     <label class="check" id="sysbox"><input type="checkbox" id="sysaudio"> <span>Spela även in datorns ljud (filmklipp i presentationen). Fungerar när du delar <b>hela skärmen</b>.</span></label>
 
-    <div class="row">
-      <div><label for="vsrc">Kamera</label><select id="vsrc"></select></div>
-      <div><label for="corner">Placering</label>
-        <select id="corner">
-          <option value="br">Nere till höger</option><option value="bl">Nere till vänster</option>
-          <option value="tr">Uppe till höger</option><option value="tl">Uppe till vänster</option>
-        </select></div>
+    <label for="vsrc">Kamera</label>
+    <select id="vsrc"></select>
+    <div id="camextra" class="hidden">
+      <div class="srcinfo" id="vinfo"></div>
+      <label for="corner">Kamerabildens placering i inspelningen</label>
+      <select id="corner">
+        <option value="br">Nere till höger</option><option value="bl">Nere till vänster</option>
+        <option value="tr">Uppe till höger</option><option value="tl">Uppe till vänster</option>
+      </select>
+      <video id="campv" class="cam" muted playsinline></video>
     </div>
-    <div class="srcinfo" id="vinfo">Ingen kamera</div>
-    <video id="campv" class="cam hidden" muted playsinline></video>
     <p class="muted hidden" id="nocomp">Kamera i inspelningen kräver Chrome eller Edge.</p>
+  </section>
 
-    <label class="check" id="autobox"><input type="checkbox" id="autorec" checked> <span>Starta inspelningen automatiskt när föreläsarens skärm kommer in, och stoppa när den försvinner.</span></label>
-    <label for="quality">Bildkvalitet</label>
+  <section id="reccfg" class="card hidden">
+    <h2>Inspelning</h2>
+    <label for="quality">Bildkvalitet för inspelningen av presentationen</label>
     <select id="quality">
-      <option value="20000000">Mycket hög – för animationer, ca 9 GB per timme</option>
+      <option value="20000000">Mycket hög – för presentationer med mycket animationer, ca 9 GB per timme</option>
       <option value="10000000">Hög – ca 4,5 GB per timme</option>
       <option value="5000000">Normal – ca 2,3 GB per timme</option>
     </select>
+    <p class="muted">Gäller den sparade filen: presentationen med alla animationer, och kameran om den är med. Bilden som skickas från föreläsaren har alltid full kvalitet.</p>
+    <label class="check" id="autobox"><input type="checkbox" id="autorec" checked> <span>Starta inspelningen automatiskt när föreläsarens skärm kommer in, och stoppa när den försvinner.</span></label>
   </section>
 
   <section id="startcard" class="card hidden">
@@ -416,13 +421,24 @@ async function buildSelects() {
       list.forEach((d) => g2.append(new Option(d.label, "remote:" + d.id)));
       el.append(g2);
     }
-    if ([...el.options].some((o) => o.value === cur)) el.value = cur;
+    const has = (v) => [...el.options].some((o) => o.value === v);
+    // The device actually open now (ids change once the browser is allowed to use the device)
+    const tr = kind === "audio" ? localAudio?.getAudioTracks()[0] : localCam?.getVideoTracks()[0];
+    const openId = tr && tr.readyState === "live" ? tr.getSettings().deviceId : null;
+    const openVal = openId != null ? "local:" + (openId === "default" ? "" : openId) : null;
+    if (has(cur)) el.value = cur;
     else if (cur.startsWith("remote:") && remoteOn) el.value = "remote:";
+    else if (cur.startsWith("local:") && openVal && has(openVal)) el.value = openVal;
+    else if (cur.startsWith("local:")) el.value = g1.querySelector("option").value; // keep a local device, never fall back to "none"
     else el.selectedIndex = 0;
   };
+  const before = { ...sel };
   fill($("asrc"), "audio", sel.audio, null);
   fill($("vsrc"), "video", sel.video, "Ingen kamera");
   sel.audio = $("asrc").value; sel.video = $("vsrc").value;
+  // If the list changed the choice, make what runs follow what the list shows
+  if (sourcesStarted && sel.audio !== before.audio) applyAudio();
+  if (sourcesStarted && sel.video !== before.video) applyVideo();
 }
 
 const AUDIO_OPTS = { echoCancellation: false, noiseSuppression: true, autoGainControl: true };
@@ -460,6 +476,8 @@ async function applyVideo() {
   } else if (where === "remote") camTrack = remoteCam?.getVideoTracks()[0] || null;
   else camTrack = null;
   comp?.setSource("cam", camTrack);
+  // "Ingen kamera": no picture of yourself and no placement choice
+  show("camextra", sel.video !== "none");
   show("campv", !!camTrack);
   $("campv").srcObject = camTrack ? new MediaStream([camTrack]) : null;
   if (camTrack) $("campv").play().catch(() => {});
@@ -1139,6 +1157,7 @@ function updateUi() {
   show("lect", r === "lecturer");
   show("techcode", r === "tech");
   show("setup", r !== "lecturer");
+  show("reccfg", r !== "lecturer");
   show("sysbox", r === "both");
   show("autobox", r === "tech");
   show("bothhelp", r === "both");
