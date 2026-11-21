@@ -33,6 +33,9 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // --check: start and quit at once. The start file runs a freshly downloaded version this way in
+        // the background, so Windows' security scan of the new file is done before anyone waits for it.
+        if (args.Contains("--check")) return;
         using var mutex = new Mutex(true, "Fermata.Helper.SingleInstance", out bool first);
         if (!first) { ShowRunning(); OpenPage(); return; }   // already running: bring its window forward, show the page
 
